@@ -583,44 +583,74 @@ def render_agenda(spec, out, tmp):
     cw, x0 = W - 120, 60
     y0 = cal.get("top", 330)
     rows = cal["rows"]
-    ft, fb, fp = font("raleway", 40, 700), font("raleway", 34, 600), font("raleway", 26, 700)
+    ft, fb, fs, fp = font("raleway", 38, 700), font("raleway", 33, 700), font("raleway", 26, 500), font("raleway", 24, 700)
+    ink, grey = (25, 25, 28, 255), (110, 114, 120, 255)
+    tx_col = 50 + 230  # text column, after the timeline and the time
     row_imgs = []
-    for when, what, where in rows:
+    for row in rows:
+        when, what, where = row[:3]
+        who = row[3] if len(row) > 3 else ""
         tl = draw_line(when, ft, BLUE)
-        lines = [draw_line(ln, fb, (25, 25, 28, 255)) for ln in wrap(what, fb, cw - 120 - 200)]
-        h = max(tl.height, sum(l.height for l in lines)) + (44 if where else 0) + 30
+        lines = [draw_line(ln, fb, ink) for ln in wrap(what, fb, cw - tx_col - 50)]
+        if who:
+            lines += [draw_line(ln, fs, grey) for ln in wrap(who, fs, cw - tx_col - 50)]
+        body_h = sum(l.height for l in lines) + (48 if where else 0)
+        h = max(tl.height, body_h) + 40
         im = Image.new("RGBA", (cw, h), (0, 0, 0, 0))
-        im.alpha_composite(tl, (50, 14))
+        di = ImageDraw.Draw(im)
+        # timeline: a blue line through every row and a dot at each session
+        di.line([(62, 0), (62, h)], fill=(59, 169, 240, 90), width=4)
+        di.ellipse([50, 22, 74, 46], fill=BLUE, outline=(250, 250, 248, 255), width=4)
+        im.alpha_composite(tl, (92, 16))
         y = 18
-        for l in lines:
-            im.alpha_composite(l, (50 + 200, y))
-            y += l.height
+        for k, l in enumerate(lines):
+            im.alpha_composite(l, (tx_col, y))
+            y += l.height + (4 if k == len(lines) - 1 else 0)
         if where:
-            im.alpha_composite(pill(where, fp, (4, 32, 47, 255), BLUE, (14, 4)), (50 + 200, y + 8))
-        ImageDraw.Draw(im).line([(50, h - 2), (cw - 50, h - 2)], fill=(220, 220, 222, 255), width=2)
+            im.alpha_composite(pill(where, fp, (4, 32, 47, 255), BLUE, (14, 5)), (tx_col, y + 8))
         row_imgs.append(im)
-    head_h = 330
-    card_h = head_h + sum(r.height for r in row_imgs) + 40
+    head_h = 340
+    card_h = head_h + sum(r.height for r in row_imgs) + 40 + (70 if cal.get("footer") else 0)
     if "top" not in cal:
-        y0 = max(380, (H - card_h) // 2 - 40)  # centered, inside the area every phone shows
+        y0 = max(400, (H - card_h) // 2 - 40)  # centered, inside the area every phone shows
     card = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(card)
     sh = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    ImageDraw.Draw(sh).rounded_rectangle([x0, y0 + 14, x0 + cw, y0 + card_h + 14], radius=34, fill=(0, 0, 0, 160))
-    card.alpha_composite(sh.filter(ImageFilter.GaussianBlur(24)))
+    ImageDraw.Draw(sh).rounded_rectangle([x0, y0 + 30, x0 + cw, y0 + card_h + 40], radius=34, fill=(0, 0, 0, 170))
+    card.alpha_composite(sh.filter(ImageFilter.GaussianBlur(26)))
+    # pages underneath, so it reads as a desk calendar pad
+    for k, tone in ((2, 214), (1, 232)):
+        d.rounded_rectangle([x0 + 10 * k, y0 + 20, x0 + cw - 10 * k, y0 + card_h + 12 * k], radius=34, fill=(tone, tone, tone - 2, 255))
     d.rounded_rectangle([x0, y0, x0 + cw, y0 + card_h], radius=34, fill=(250, 250, 248, 255))
-    d.rounded_rectangle([x0, y0, x0 + cw, y0 + head_h], radius=34, fill=BLUE)
-    d.rectangle([x0, y0 + head_h - 40, x0 + cw, y0 + head_h], fill=BLUE)
+    head = Image.new("RGBA", (cw, head_h), BLUE)
+    hd = ImageDraw.Draw(head)
+    for k in range(-head_h, cw, 26):  # fine diagonal texture in a lighter tone of the same blue
+        hd.line([(k, head_h), (k + head_h, 0)], fill=(88, 184, 244, 255), width=2)
+    hm = Image.new("L", (cw, head_h), 0)
+    ImageDraw.Draw(hm).rounded_rectangle([0, 0, cw - 1, head_h + 40], radius=34, fill=255)
+    head.putalpha(hm)
+    card.alpha_composite(head, (x0, y0))
+    # binding: two punched holes with metal rings
     for i in range(2):
-        hx = x0 + cw * (0.25 + 0.5 * i)
-        d.rounded_rectangle([hx - 14, y0 - 34, hx + 14, y0 + 34], radius=14, fill=(30, 30, 32, 255))
-    dn = draw_line(cal["day_number"], font("inter", 190, 800), WHITE, 1.15)
-    card.alpha_composite(dn, (x0 + 60, y0 + (head_h - dn.height) // 2 + 6))
-    wd = draw_line(cal["weekday"], font("raleway", 54, 700), WHITE)
-    mo = draw_line(cal["month"], font("raleway", 40, 600), (4, 32, 47, 255))
+        hx = round(x0 + cw * (0.25 + 0.5 * i))
+        d.ellipse([hx - 20, y0 + 22, hx + 20, y0 + 62], fill=(14, 14, 16, 255))
+        d.rounded_rectangle([hx - 11, y0 - 40, hx + 11, y0 + 44], radius=11, fill=(150, 152, 156, 255))
+        d.rounded_rectangle([hx - 5, y0 - 34, hx + 1, y0 + 36], radius=3, fill=(225, 226, 228, 255))
+    dn = draw_line(cal["day_number"], font("inter", 200, 800), WHITE, 1.15)
+    card.alpha_composite(dn, (x0 + 60, y0 + (head_h - dn.height) // 2 + 20))
+    wd = draw_line(cal["weekday"], font("raleway", 56, 700), WHITE)
+    mo = draw_line(cal["month"], font("raleway", 38, 600), (4, 32, 47, 255))
     tx = x0 + 60 + dn.width + 40
-    card.alpha_composite(wd, (tx, y0 + head_h // 2 - wd.height + 4))
-    card.alpha_composite(mo, (tx, y0 + head_h // 2 + 12))
+    card.alpha_composite(wd, (tx, y0 + head_h // 2 - wd.height + 20))
+    card.alpha_composite(mo, (tx, y0 + head_h // 2 + 28))
+    if cal.get("tag"):
+        tg = pill(cal["tag"], font("raleway", 28, 700), BLUE, (255, 255, 255, 255), (18, 6))
+        card.alpha_composite(tg, (x0 + cw - tg.width - 40, y0 + 86))
+    if cal.get("footer"):
+        ff = draw_line(cal["footer"], font("raleway", 26, 600), grey)
+        fy = y0 + card_h - 62
+        d.line([(x0 + 50, fy - 14), (x0 + cw - 50, fy - 14)], fill=(225, 225, 227, 255), width=2)
+        card.alpha_composite(ff, ((W - ff.width) // 2, fy))
     if cal.get("title"):
         tt = draw_line(cal["title"], font("raleway", 64, 700), WHITE)
         tsh = Image.new("RGBA", (W, H), (0, 0, 0, 0))
