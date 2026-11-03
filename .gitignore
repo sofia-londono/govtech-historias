@@ -1,0 +1,10 @@
+guia-cobertura/
+pc/.venv/
+pc/bin/
+pc/data/
+__pycache__/
+.vercel/
+.env*
+web/tunnel.json
+*.mp4
+*.mov
