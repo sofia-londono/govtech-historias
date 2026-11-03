@@ -693,14 +693,30 @@ def render_postcard(spec, out, tmp):
     ft, fm, fa = font("raleway", 56, 700), font("raleway", 34, 600), font("raleway", 28, 600)
     card = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(card)
-    # message block, measured first so the card fits it
-    ty = wy + wh + 50
-    title = draw_line(pc["title"], ft, BLUE)
-    msg = [draw_line(ln, fm, ink) for ln in wrap(pc["message"], fm, ww - 20)]
-    addr = [draw_line(t, fa, grey) for t in pc.get("address", [])]
-    msg_y = ty + title.height + 200
-    end_y = msg_y + sum(m.height for m in msg) + 30 + sum(a.height + 30 for a in addr)
-    ch = end_y - y0 + 40
+    # message block, measured first so the card fits it: it wraps narrower beside the stamp
+    ty = wy + wh + 46
+    sw, shh = 190, 220
+    title = draw_line(pc["title"], ft, BLUE) if pc.get("title") else None
+    msg_y = ty + (title.height + 24 if title else 0)
+    lines, cur, yy = [], "", msg_y
+    lh = fm.getbbox("Ág")[3] + 10
+    for word in pc["message"].split():
+        width = ww - sw - 40 if yy < ty + shh + 10 else ww - 10
+        probe = f"{cur} {word}".strip()
+        if fm.getlength(probe) > width and cur:
+            lines.append((cur, yy))
+            cur, yy = word, yy + lh
+        else:
+            cur = probe
+    if cur:
+        lines.append((cur, yy))
+        yy += lh
+    fc = font("raleway", 46, 800)
+    closing = [draw_line(ln, fc, BLUE) for ln in wrap(pc.get("closing", ""), fc, ww - 10)] if pc.get("closing") else []
+    close_y = max(yy, ty + shh + 10) + 26
+    pm_y = close_y + sum(c.height for c in closing) + 30
+    end_y = pm_y + (210 if pc.get("postmark") else 0)
+    ch = end_y - y0 + 30
     sh = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     ImageDraw.Draw(sh).rounded_rectangle([x0, y0 + 24, x0 + cw, y0 + ch + 24], radius=26, fill=(0, 0, 0, 170))
     card.alpha_composite(sh.filter(ImageFilter.GaussianBlur(24)))
@@ -709,10 +725,10 @@ def render_postcard(spec, out, tmp):
     hole = Image.new("L", (W * 2, H * 2), 255)
     ImageDraw.Draw(hole).rounded_rectangle([wx * 2, wy * 2, (wx + ww) * 2 - 1, (wy + wh) * 2 - 1], radius=36, fill=0)
     card.putalpha(Image.fromarray(np.minimum(np.asarray(card.getchannel("A")), np.asarray(hole.resize((W, H), Image.LANCZOS)))))
-    card.alpha_composite(title, (wx, ty))
-    # stamp: perforated edge, blue face, event name; postmark rings over its corner
-    sw, shh = 190, 220
-    sx, sy = wx + ww - sw, ty - 10
+    if title:
+        card.alpha_composite(title, (wx, ty))
+    # stamp: perforated edge, blue face, event name; the postmark goes at the bottom of the card
+    sx, sy = wx + ww - sw, ty - 6
     st = Image.new("RGBA", (sw, shh), (0, 0, 0, 0))
     sd = ImageDraw.Draw(st)
     sd.rectangle([0, 0, sw - 1, shh - 1], fill=(255, 255, 255, 255))
@@ -738,16 +754,13 @@ def render_postcard(spec, out, tmp):
         for k in range(3):
             pts = [(205 + j * 6, 70 + k * 30 + 8 * np.sin(j / 2.2)) for j in range(26)]
             pd.line(pts, fill=(40, 40, 46, 160), width=4)
-        card.alpha_composite(pm.rotate(-10, Image.BICUBIC, expand=True), (sx - 330, sy + 40))
-    y = msg_y
-    for m in msg:
-        card.alpha_composite(m, (wx, y))
-        y += m.height
-    y += 30
-    for a in addr:
-        card.alpha_composite(a, (wx, y))
-        d.line([(wx, y + a.height + 8), (wx + ww, y + a.height + 8)], fill=(205, 205, 208, 255), width=2)
-        y += a.height + 30
+        card.alpha_composite(pm.rotate(-6, Image.BICUBIC, expand=True), (wx - 20, pm_y - 20))
+    for text, ly in lines:
+        card.alpha_composite(draw_line(text, fm, ink), (wx, ly))
+    y = close_y
+    for c in closing:
+        card.alpha_composite(c, (wx, y))
+        y += c.height
     inputs = a1 + a2 + overlay_input(card, tmp, "card")
     parts = [
         f"[0:v]{c1}[bg]",
