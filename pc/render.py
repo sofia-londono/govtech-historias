@@ -190,7 +190,7 @@ def source(item, idx, tmp, w, h, dur):
             f"scale={w * 2}:{h * 2}:force_original_aspect_ratio=increase:flags=lanczos,"
             f"crop={w * 2}:{h * 2}:(iw-{w * 2})*{fx}:(ih-{h * 2})*{fy},"
             f"zoompan=z='1+0.05*on/{n}':x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2':d={n}:s={w}x{h}:fps={FPS},"
-            f"{LOOK},scale=in_range=pc:out_range=tv,setsar=1,format=yuv420p,trim=duration={dur},setpts=PTS-STARTPTS"
+            f"{LOOK},{'unsharp=5:5:0.6:5:5:0,' if item.get('sharp') else ''}scale=in_range=pc:out_range=tv,setsar=1,format=yuv420p,trim=duration={dur},setpts=PTS-STARTPTS"
         )
         return ["-i", str(prepare_image(src, tmp, idx))], chain, False
     info = probe(src)
@@ -327,17 +327,38 @@ def grid_design(design, cells, rh, labels):
     r = design.get("radius", 28)
     for x, y, cw in cells:
         d.rounded_rectangle([x * s, y * s, (x + cw) * s - 1, (y + rh) * s - 1], radius=r * s, fill=0)
-    frame = Image.new("RGBA", (W, H), (0, 0, 0, 255))
+    # background: black into the event's deep blue, a soft blue glow and a faint grid like the campaign
+    yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+    t = yy / H
+    glow = np.exp(-(((xx - W * 0.85) / 700) ** 2 + ((yy - H * 0.12) / 650) ** 2))
+    glow2 = np.exp(-(((xx - W * 0.1) / 650) ** 2 + ((yy - H * 0.95) / 600) ** 2))
+    rgb = np.stack([
+        6 + 6 * t + 30 * glow + 20 * glow2,
+        8 + 22 * t + 95 * glow + 60 * glow2,
+        12 + 40 * t + 150 * glow + 95 * glow2,
+    ], -1)
+    grid = ((xx % 90) < 1.5) | ((yy % 90) < 1.5)
+    rgb[grid] += 14
+    frame = Image.fromarray(np.clip(rgb, 0, 255).astype(np.uint8), "RGB").convert("RGBA")
     frame.putalpha(mask.resize((W, H), Image.LANCZOS))
+    edge = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ed = ImageDraw.Draw(edge)
+    for x, y, cw in cells:
+        ed.rounded_rectangle([x - 3, y - 3, x + cw + 2, y + rh + 2], radius=r + 3, outline=(59, 169, 240, 170), width=3)
+    frame.alpha_composite(edge.filter(ImageFilter.GaussianBlur(6)))
+    frame.alpha_composite(edge)
     title = design.get("title") or []
     y = design["top"] - 70
     imgs = []
     for i, t in enumerate(title):
         imgs.append(draw_line(t, font("raleway", 64 if i == 0 else 38, 700 if i == 0 else 600), WHITE if i == 0 else (190, 220, 240, 255)))
     y -= sum(im.height for im in imgs)
-    for im in imgs:
+    for i, im in enumerate(imgs):
         frame.alpha_composite(im, ((W - im.width) // 2, y))
         y += im.height
+        if i == 0 and len(imgs) > 1:
+            ImageDraw.Draw(frame).rounded_rectangle([W // 2 - 40, y + 4, W // 2 + 40, y + 10], radius=3, fill=BLUE)
+            y += 18
     fp = font("raleway", 34, 700)
     for (x, cy, cw), lab in zip(cells, labels):
         if not lab:
@@ -387,7 +408,7 @@ def render_grid(spec, out, tmp):
         cells.append((margin + c * (cw + line), top + r * (rh + line), cw))
     inputs, parts = [], []
     for i, (item, (x, y, cw)) in enumerate(zip(items, cells)):
-        args, chain, _ = source({**item, "audio": False}, i, tmp, cw, rh, dur)
+        args, chain, _ = source({**item, "audio": False, "sharp": True}, i, tmp, cw, rh, dur)
         inputs += args
         parts.append(f"[{i}:v]{chain}[r{i}]")
     parts.append(f"color=c={'black' if design else 'white'}:s={W}x{H}:r={FPS}:d={dur},format=yuv420p[bg]")
@@ -565,7 +586,7 @@ def previews(out):
     out = Path(out)
     prev = out.with_name(out.stem + "_preview.mp4")
     poster = out.with_name(out.stem + ".jpg")
-    run([FFMPEG, "-y", "-v", "error", "-i", str(out), "-vf", f"scale=540:{H // 2}:flags=lanczos", "-c:v", "libx264", "-preset", "veryfast", "-crf", "27", "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", str(prev)])
+    run([FFMPEG, "-y", "-v", "error", "-i", str(out), "-vf", f"scale=720:{H * 2 // 3}:flags=lanczos", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", str(prev)])
     run([FFMPEG, "-y", "-v", "error", "-ss", "1.9", "-i", str(out), "-frames:v", "1", "-vf", f"scale=540:{H // 2}", "-q:v", "4", str(poster)])
     return prev, poster
 
