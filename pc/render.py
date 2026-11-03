@@ -293,7 +293,8 @@ def render_stack(spec, out, tmp):
             rows_img = [draw_line(lab[0], fn)] + [draw_line(r, fr) for r in lab[1:]]
             h = sum(p.height for p in rows_img)
             top = i * (rh + line)
-            y = max(top + 40, 300, min(top + rh - 40 - h, BOTTOM - h))
+            floor = H - 260 if items[i].get("label_low") else BOTTOM  # label_low: as low as the reply bar allows
+            y = max(top + 40, 300, min(top + rh - 40 - h, floor - h))
             words = Image.new("RGBA", (W, H), (0, 0, 0, 0))
             for p in rows_img:
                 words.alpha_composite(p, (56, y))
