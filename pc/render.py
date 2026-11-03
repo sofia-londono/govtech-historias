@@ -522,6 +522,131 @@ def render_grid(spec, out, tmp):
     run([FFMPEG, "-y", "-v", "error", *inputs, "-filter_complex", ";".join(parts), "-map", "[v]", "-map", "[a]", "-t", str(dur), *ENCODE, str(out)])
 
 
+def pill(text, f, fg, bg, pad=(22, 8)):
+    t = draw_line(text, f, fg)
+    im = Image.new("RGBA", (t.width + 2 * pad[0], t.height + 2 * pad[1]), (0, 0, 0, 0))
+    ImageDraw.Draw(im).rounded_rectangle([0, 0, im.width - 1, im.height - 1], radius=im.height // 2, fill=bg)
+    im.alpha_composite(t, (pad[0], pad[1]))
+    return im
+
+
+def render_split(spec, out, tmp):
+    """"Mientras tanto": two places at once, top and bottom, with a black band in between."""
+    items = spec["items"][:2]
+    dur = spec.get("duration", 7)
+    band = spec.get("band_height", 200)
+    rh = (H - band) // 2
+    rh -= rh % 2
+    inputs, parts, audio = [], [], None
+    for i, item in enumerate(items):
+        args, chain, has_audio = source({**item, "audio": item.get("audio", False), "sharp": True}, i, tmp, W, rh, dur)
+        inputs += args
+        parts.append(f"[{i}:v]{chain}[r{i}]")
+        if has_audio and audio is None:
+            audio = i
+    layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    by = rh
+    ImageDraw.Draw(layer).rectangle([0, by, W, by + band], fill=(0, 0, 0, 255))
+    ImageDraw.Draw(layer).rectangle([0, by, W, by + 6], fill=BLUE)
+    ImageDraw.Draw(layer).rectangle([0, by + band - 6, W, by + band], fill=BLUE)
+    big = draw_line(spec.get("band", "Mientras tanto…"), font("bask", 64, 400), WHITE)
+    layer.alpha_composite(big, ((W - big.width) // 2, by + (band - big.height) // 2))
+    fl = font("raleway", 34, 700)
+    for i, item in enumerate(items):
+        if item.get("label"):
+            p = pill(item["label"], fl, (4, 32, 47, 255), BLUE)
+            y = max(300, i * (rh + band) + 40) if i == 0 else min(i * (rh + band) + rh - p.height - 40, BOTTOM - p.height)
+            layer.alpha_composite(p, (40, y))
+    text = text_layer(spec.get("text"))
+    if text:
+        layer.alpha_composite(text)
+    inputs += overlay_input(layer, tmp, "t")
+    n = len(items)
+    parts.append(f"color=c=black:s={W}x{H}:r={FPS}:d={dur},format=yuv420p[bg]")
+    parts.append(f"[bg][r0]overlay=0:0[s0]")
+    parts.append(f"[s0][r1]overlay=0:{rh + band}[s1]")
+    parts.append(f"[{n}:v]format=rgba,trim=duration={dur},setpts=PTS-STARTPTS[o]")
+    parts.append(f"[s1][o]overlay=shortest=1,format=yuv420p[v]")
+    if audio is not None:
+        parts.append(f"[{audio}:a]atrim=duration={dur},asetpts=PTS-STARTPTS,loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000[a]")
+    else:
+        parts.append(f"anullsrc=r=48000:cl=stereo,atrim=duration={dur}[a]")
+    run([FFMPEG, "-y", "-v", "error", *inputs, "-filter_complex", ";".join(parts), "-map", "[v]", "-map", "[a]", "-t", str(dur), *ENCODE, str(out)])
+
+
+def render_agenda(spec, out, tmp):
+    """Calendar page over a darkened black-and-white background; rows appear one by one."""
+    dur = spec.get("duration", 8)
+    cal = spec["calendar"]
+    args, chain, _ = source({**spec["items"][0], "audio": False}, 0, tmp, W, H, dur)
+    chain += ",hue=s=0,eq=brightness=-0.18:contrast=1.05"
+    cw, x0 = W - 120, 60
+    y0 = cal.get("top", 330)
+    rows = cal["rows"]
+    ft, fb, fp = font("raleway", 40, 700), font("raleway", 34, 600), font("raleway", 26, 700)
+    row_imgs = []
+    for when, what, where in rows:
+        tl = draw_line(when, ft, BLUE)
+        lines = [draw_line(ln, fb, (25, 25, 28, 255)) for ln in wrap(what, fb, cw - 120 - 200)]
+        h = max(tl.height, sum(l.height for l in lines)) + (44 if where else 0) + 30
+        im = Image.new("RGBA", (cw, h), (0, 0, 0, 0))
+        im.alpha_composite(tl, (50, 14))
+        y = 18
+        for l in lines:
+            im.alpha_composite(l, (50 + 200, y))
+            y += l.height
+        if where:
+            im.alpha_composite(pill(where, fp, (4, 32, 47, 255), BLUE, (14, 4)), (50 + 200, y + 8))
+        ImageDraw.Draw(im).line([(50, h - 2), (cw - 50, h - 2)], fill=(220, 220, 222, 255), width=2)
+        row_imgs.append(im)
+    head_h = 330
+    card_h = head_h + sum(r.height for r in row_imgs) + 40
+    if "top" not in cal:
+        y0 = max(380, (H - card_h) // 2 - 40)  # centered, inside the area every phone shows
+    card = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(card)
+    sh = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ImageDraw.Draw(sh).rounded_rectangle([x0, y0 + 14, x0 + cw, y0 + card_h + 14], radius=34, fill=(0, 0, 0, 160))
+    card.alpha_composite(sh.filter(ImageFilter.GaussianBlur(24)))
+    d.rounded_rectangle([x0, y0, x0 + cw, y0 + card_h], radius=34, fill=(250, 250, 248, 255))
+    d.rounded_rectangle([x0, y0, x0 + cw, y0 + head_h], radius=34, fill=BLUE)
+    d.rectangle([x0, y0 + head_h - 40, x0 + cw, y0 + head_h], fill=BLUE)
+    for i in range(2):
+        hx = x0 + cw * (0.25 + 0.5 * i)
+        d.rounded_rectangle([hx - 14, y0 - 34, hx + 14, y0 + 34], radius=14, fill=(30, 30, 32, 255))
+    dn = draw_line(cal["day_number"], font("inter", 190, 800), WHITE, 1.15)
+    card.alpha_composite(dn, (x0 + 60, y0 + (head_h - dn.height) // 2 + 6))
+    wd = draw_line(cal["weekday"], font("raleway", 54, 700), WHITE)
+    mo = draw_line(cal["month"], font("raleway", 40, 600), (4, 32, 47, 255))
+    tx = x0 + 60 + dn.width + 40
+    card.alpha_composite(wd, (tx, y0 + head_h // 2 - wd.height + 4))
+    card.alpha_composite(mo, (tx, y0 + head_h // 2 + 12))
+    if cal.get("title"):
+        tt = draw_line(cal["title"], font("raleway", 64, 700), WHITE)
+        tsh = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        tsh.alpha_composite(tt, ((W - tt.width) // 2, y0 - 70 - tt.height))
+        blur = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        blur.putalpha(tsh.getchannel("A"))
+        card.alpha_composite(blur.filter(ImageFilter.GaussianBlur(12)))
+        card.alpha_composite(tt, ((W - tt.width) // 2, y0 - 70 - tt.height))
+    inputs = args + overlay_input(card, tmp, "card")
+    parts = [f"[0:v]{chain}[b]", f"[1:v]format=rgba,fade=t=in:st=0:d=0.35:alpha=1,trim=duration={dur},setpts=PTS-STARTPTS[c]", "[b][c]overlay=shortest=1[s0]"]
+    y = y0 + head_h + 10
+    last = "s0"
+    for i, im in enumerate(row_imgs):
+        full = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        full.alpha_composite(im, (x0, y))
+        y += im.height
+        inputs += overlay_input(full, tmp, f"row{i}")
+        st = 0.5 + 0.35 * i
+        parts.append(f"[{i + 2}:v]format=rgba,fade=t=in:st={st}:d=0.35:alpha=1,trim=duration={dur},setpts=PTS-STARTPTS[q{i}]")
+        parts.append(f"[{last}][q{i}]overlay=shortest=1[s{i + 1}]")
+        last = f"s{i + 1}"
+    parts.append(f"[{last}]format=yuv420p[v]")
+    parts.append(f"anullsrc=r=48000:cl=stereo,atrim=duration={dur}[a]")
+    run([FFMPEG, "-y", "-v", "error", *inputs, "-filter_complex", ";".join(parts), "-map", "[v]", "-map", "[a]", "-t", str(dur), *ENCODE, str(out)])
+
+
 def paper_sheet(size, seed):
     rng = np.random.default_rng(seed)
     noise = rng.normal(0, 3.2, (size, size)).astype(np.float32)
@@ -683,7 +808,7 @@ def previews(out):
 
 def render(spec, out):
     with tempfile.TemporaryDirectory() as tmp:
-        {"cuts": render_cuts, "stack": render_stack, "grid": render_grid, "note": render_note}[spec["layout"]](spec, out, tmp)
+        {"cuts": render_cuts, "stack": render_stack, "grid": render_grid, "split": render_split, "agenda": render_agenda, "note": render_note}[spec["layout"]](spec, out, tmp)
     return previews(out)
 
 
