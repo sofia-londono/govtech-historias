@@ -136,7 +136,8 @@ def text_layer(spec):
     tw = max(i.width for i in imgs)
     th = sum(i.height for i in imgs) + gap * (len(imgs) - 1)
     pad = 44 if box else 0
-    bottom = BOTTOM if spec.get("pos", "low") == "low" else (H + th) // 2
+    pos = spec.get("pos", "low")
+    bottom = pos if isinstance(pos, int) else BOTTOM if pos == "low" else (H + th) // 2
     y = bottom - th - pad
     layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     if box:
