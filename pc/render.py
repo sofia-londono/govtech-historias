@@ -319,34 +319,74 @@ def render_stack(spec, out, tmp):
     run([FFMPEG, "-y", "-v", "error", *inputs, "-filter_complex", ";".join(parts), "-map", "[v]", "-map", "[a]", "-t", str(dur), *ENCODE, str(out)])
 
 
+def grid_design(design, cells, rh, labels):
+    """Black frame with rounded windows, a title on top and a blue name pill per photo."""
+    s = 2
+    mask = Image.new("L", (W * s, H * s), 255)
+    d = ImageDraw.Draw(mask)
+    r = design.get("radius", 28)
+    for x, y, cw in cells:
+        d.rounded_rectangle([x * s, y * s, (x + cw) * s - 1, (y + rh) * s - 1], radius=r * s, fill=0)
+    frame = Image.new("RGBA", (W, H), (0, 0, 0, 255))
+    frame.putalpha(mask.resize((W, H), Image.LANCZOS))
+    title = design.get("title") or []
+    y = design["top"] - 70
+    imgs = []
+    for i, t in enumerate(title):
+        imgs.append(draw_line(t, font("raleway", 64 if i == 0 else 38, 700 if i == 0 else 600), WHITE if i == 0 else (190, 220, 240, 255)))
+    y -= sum(im.height for im in imgs)
+    for im in imgs:
+        frame.alpha_composite(im, ((W - im.width) // 2, y))
+        y += im.height
+    fp = font("raleway", 34, 700)
+    for (x, cy, cw), lab in zip(cells, labels):
+        if not lab:
+            continue
+        txt = draw_line(lab, fp, (4, 32, 47, 255))
+        pw, ph = txt.width + 36, txt.height + 10
+        px, py = x + 18, cy + rh - ph - 18
+        ImageDraw.Draw(frame).rounded_rectangle([px, py, px + pw, py + ph], radius=ph // 2, fill=BLUE)
+        frame.alpha_composite(txt, (px + 18, py + 5))
+    return frame
+
+
 def render_grid(spec, out, tmp):
-    """Collage: one column up to 3 items, two columns from 4; an odd last item spans the row."""
+    """Collage: one column up to 3 items, two columns from 4; an odd last item spans the row.
+    With "design": {title, top, bottom, margin, gap, radius} it sits on black with rounded photos."""
     items = spec["items"]
     dur = spec.get("duration", 6)
     n = len(items)
     cols = 1 if n <= 3 else 2
     rows = -(-n // cols)
-    line = 8
-    rh = (H - line * (rows - 1)) // rows
+    design = spec.get("design")
+    line = design.get("gap", 16) if design else 8
+    margin = design.get("margin", 40) if design else 0
+    top, bottom = (design["top"], design["bottom"]) if design else (0, H)
+    rh = (bottom - top - line * (rows - 1)) // rows
     rh -= rh % 2
     cells = []
     for i in range(n):
         r, c = divmod(i, cols)
         span = cols if (i == n - 1 and n % cols) else 1
-        cw = W if span == cols else (W - line * (cols - 1)) // cols
+        cw = W - 2 * margin if span == cols else (W - 2 * margin - line * (cols - 1)) // cols
         cw -= cw % 2
-        cells.append((c * (cw + line), r * (rh + line), cw))
+        cells.append((margin + c * (cw + line), top + r * (rh + line), cw))
     inputs, parts = [], []
     for i, (item, (x, y, cw)) in enumerate(zip(items, cells)):
         args, chain, _ = source({**item, "audio": False}, i, tmp, cw, rh, dur)
         inputs += args
         parts.append(f"[{i}:v]{chain}[r{i}]")
-    parts.append(f"color=c=white:s={W}x{H}:r={FPS}:d={dur},format=yuv420p[bg]")
+    parts.append(f"color=c={'black' if design else 'white'}:s={W}x{H}:r={FPS}:d={dur},format=yuv420p[bg]")
     last = "bg"
     for i, (x, y, _) in enumerate(cells):
         parts.append(f"[{last}][r{i}]overlay={x}:{y}[s{i}]")
         last = f"s{i}"
     layer = text_layer(spec.get("text"))
+    if design:
+        frame = grid_design(design, cells, rh, [it.get("label") for it in items])
+        if layer:
+            frame.alpha_composite(layer)
+        layer = frame
     if layer:
         inputs += overlay_input(layer, tmp, "t")
         parts.append(f"[{n}:v]format=rgba,fade=t=in:st=0.2:d=0.3:alpha=1,trim=duration={dur},setpts=PTS-STARTPTS[o]")
