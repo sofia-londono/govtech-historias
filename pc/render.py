@@ -127,6 +127,11 @@ def text_layer(spec):
             break
         size -= 4
     imgs = [draw_line(ln, f, stretch=stretch) for ln in lines]
+    if spec.get("sub"):
+        # smaller credit lines under the main text, e.g. a quote's speaker and role
+        fs = font(family, round(size * 0.66), 600)
+        imgs.append(Image.new("RGBA", (1, round(size * 0.35)), (0, 0, 0, 0)))
+        imgs += [draw_line(ln, fs) for s in spec["sub"] for ln in balance_markup(wrap(s, fs, max_w))]
     gap = round(size * 0.12)
     tw = max(i.width for i in imgs)
     th = sum(i.height for i in imgs) + gap * (len(imgs) - 1)
