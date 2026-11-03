@@ -361,6 +361,19 @@ def render_note(spec, out, tmp):
         layers.append(la)
         y += r.height + 20
 
+    logo = None
+    if note.get("logo"):
+        # the logo comes in black; the note uses it in white over the dark photo
+        src = Image.open(note["logo"]).convert("RGBA")
+        white = Image.new("RGBA", src.size, (255, 255, 255, 255))
+        white.putalpha(src.getchannel("A"))
+        lw = 540
+        white = white.resize((lw, round(src.height * lw / src.width)), Image.LANCZOS)
+        logo = Image.new("RGBA", (lw + 80, white.height + 80), (0, 0, 0, 0))
+        shade = Image.new("RGBA", logo.size, (0, 0, 0, 0))
+        shade.paste((0, 0, 0, 255), (40, 40), white.getchannel("A").point(lambda v: v * 0.7))
+        logo.alpha_composite(shade.filter(ImageFilter.GaussianBlur(14)))
+        logo.alpha_composite(white, (40, 40))
     pin = pin_sprite()
     shadow = Image.new("L", (size + 160, size + 160), 0)
     ImageDraw.Draw(shadow).rectangle([80, 90, size + 80, size + 100], fill=170)
@@ -380,11 +393,18 @@ def render_note(spec, out, tmp):
         cw, ch = round(W * zoom), round(H * zoom)
         ox, oy = (bw - cw) // 2, (bh - ch) // 2
         frame = bg_big.crop((ox, oy, ox + cw, oy + ch)).resize((W, H), Image.BILINEAR).convert("RGBA")
-        d = ImageDraw.Draw(frame)
-        for gx in grid_x:
-            d.line([(gx, 0), (gx, H)], fill=(255, 255, 255, 235), width=3)
-        for gy in grid_y:
-            d.line([(0, gy), (W, gy)], fill=(255, 255, 255, 235), width=3)
+        if note.get("grid", True):
+            d = ImageDraw.Draw(frame)
+            for gx in grid_x:
+                d.line([(gx, 0), (gx, H)], fill=(255, 255, 255, 235), width=3)
+            for gy in grid_y:
+                d.line([(0, gy), (W, gy)], fill=(255, 255, 255, 235), width=3)
+        if logo:
+            a = min(1, max(0, (t - 2.2) / 0.5))
+            if a > 0:
+                lg = logo.copy()
+                lg.putalpha(lg.getchannel("A").point(lambda v: int(v * a)))
+                paste(frame, lg, (W - lg.width) // 2, BOTTOM - lg.height - 10)
         p = min(1, max(0, (t - 0.1) / 0.7))
         py = cy - (1 - ease_out_back(p)) * 1500 if p < 1 else cy
         hit = t - 1.05  # the pin lands: small jolt
