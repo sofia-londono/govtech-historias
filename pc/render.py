@@ -59,6 +59,19 @@ def plain(text):
 
 
 def wrap(line, f, max_w):
+    """Wraps to the fewest lines, then narrows the width so the lines come out even."""
+    lines = greedy(line, f, max_w)
+    lo, hi = max_w * 0.4, max_w
+    while hi - lo > 4:
+        mid = (lo + hi) / 2
+        if len(greedy(line, f, mid)) > len(lines):
+            lo = mid
+        else:
+            hi = mid
+    return greedy(line, f, hi)
+
+
+def greedy(line, f, max_w):
     out, cur = [], ""
     for word in line.split():
         probe = f"{cur} {word}".strip()
