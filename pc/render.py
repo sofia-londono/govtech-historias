@@ -327,26 +327,18 @@ def grid_design(design, cells, rh, labels):
     r = design.get("radius", 28)
     for x, y, cw in cells:
         d.rounded_rectangle([x * s, y * s, (x + cw) * s - 1, (y + rh) * s - 1], radius=r * s, fill=0)
-    # background: black into the event's deep blue, a soft blue glow and a faint grid like the campaign
-    yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
-    t = yy / H
-    glow = np.exp(-(((xx - W * 0.85) / 700) ** 2 + ((yy - H * 0.12) / 650) ** 2))
-    glow2 = np.exp(-(((xx - W * 0.1) / 650) ** 2 + ((yy - H * 0.95) / 600) ** 2))
-    rgb = np.stack([
-        6 + 6 * t + 30 * glow + 20 * glow2,
-        8 + 22 * t + 95 * glow + 60 * glow2,
-        12 + 40 * t + 150 * glow + 95 * glow2,
-    ], -1)
-    grid = ((xx % 90) < 1.5) | ((yy % 90) < 1.5)
-    rgb[grid] += 14
-    frame = Image.fromarray(np.clip(rgb, 0, 255).astype(np.uint8), "RGB").convert("RGBA")
+    # only the event's colors: black background and a solid #3BA9F0 frame around each photo
+    frame = Image.new("RGBA", (W, H), (0, 0, 0, 255))
     frame.putalpha(mask.resize((W, H), Image.LANCZOS))
-    edge = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    bw = design.get("border", 6)
+    edge = Image.new("L", (W * s, H * s), 0)
     ed = ImageDraw.Draw(edge)
     for x, y, cw in cells:
-        ed.rounded_rectangle([x - 3, y - 3, x + cw + 2, y + rh + 2], radius=r + 3, outline=(59, 169, 240, 170), width=3)
-    frame.alpha_composite(edge.filter(ImageFilter.GaussianBlur(6)))
-    frame.alpha_composite(edge)
+        ed.rounded_rectangle([(x - bw) * s, (y - bw) * s, (x + cw + bw) * s - 1, (y + rh + bw) * s - 1], radius=(r + bw) * s, fill=255)
+        ed.rounded_rectangle([x * s, y * s, (x + cw) * s - 1, (y + rh) * s - 1], radius=r * s, fill=0)
+    blue = Image.new("RGBA", (W, H), BLUE)
+    blue.putalpha(edge.resize((W, H), Image.LANCZOS))
+    frame.alpha_composite(blue)
     title = design.get("title") or []
     y = design["top"] - 70
     imgs = []
