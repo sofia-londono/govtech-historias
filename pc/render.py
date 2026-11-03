@@ -282,6 +282,28 @@ def render_stack(spec, out, tmp):
         last = f"s{i}"
     n = rows
     layer = text_layer(spec.get("text"))
+    labels = [it.get("label") for it in items]
+    if any(labels):
+        # name and role per row, kept inside the area every phone shows
+        layer = layer or Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        for i, lab in enumerate(labels):
+            if not lab:
+                continue
+            fn, fr = font("raleway", 44, 700), font("raleway", 32, 600)
+            rows_img = [draw_line(lab[0], fn)] + [draw_line(r, fr) for r in lab[1:]]
+            h = sum(p.height for p in rows_img)
+            top = i * (rh + line)
+            y = max(top + 40, 300, min(top + rh - 40 - h, BOTTOM - h))
+            words = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+            for p in rows_img:
+                words.alpha_composite(p, (56, y))
+                y += p.height
+            shadow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+            shadow.putalpha(words.getchannel("A").point(lambda a: a * 0.85))
+            layer.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(18)))
+            layer.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(18)))
+            layer.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(4)))
+            layer.alpha_composite(words)
     if layer:
         inputs += overlay_input(layer, tmp, "t")
         parts.append(f"[{n}:v]format=rgba,fade=t=in:st=0.2:d=0.3:alpha=1,trim=duration={dur},setpts=PTS-STARTPTS[o]")
