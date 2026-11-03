@@ -167,6 +167,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(400)
             store.add_feedback(m["id"], text)
             return self.reply(200)
+        if m["rest"] == "choose":
+            text = str(data.get("text", "")).strip()[:500]
+            if not text:
+                return self.reply(400)
+            store.add_feedback(m["id"], f"Arma la historia con este texto, tal cual: {text}")
+            return self.reply(200)
         if m["rest"] == "status" and data.get("status") in ("publicada", "lista", "descartada"):
             store.update(m["id"], status=data["status"])
             return self.reply(200)

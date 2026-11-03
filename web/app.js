@@ -12,6 +12,7 @@ const V = '#3ba9f0', I = '#6d747c', T = '#fff';
 const svg = inner => `<svg viewBox='0 0 36 64'><rect width=36 height=64 rx=4 fill='#26292e'/>${inner}</svg>`;
 const FORMATOS = [
   { id: 'auto', n: 'Que Claude elija', ok: () => true, s: svg(`<text x=18 y=40 text-anchor=middle font-size=24 font-weight=800 fill='${V}'>?</text>`) },
+  { id: 'textos', n: 'Solo textos, yo la subo', ok: () => true, s: svg(`<text x=18 y=24 text-anchor=middle font-size=13 font-weight=800 fill='${V}'>Aa</text>` + box(6, 32, 24, 3, T) + box(6, 39, 24, 3, T) + box(6, 46, 24, 3, T) + box(6, 53, 16, 3, T)) },
   { id: 'video_texto', n: 'Video + texto', ok: f => f.v == 1 && f.i == 0, s: svg(box(0, 0, 36, 64, V) + box(6, 44, 24, 9, T)) },
   { id: 'imagen_texto', n: 'Imagen + texto', ok: f => f.i == 1 && f.v == 0, s: svg(box(0, 0, 36, 64, I) + box(6, 44, 24, 9, T)) },
   { id: 'tres_videos', n: 'Tres videos', ok: f => f.v == 3 && f.i == 0, s: svg(box(0, 0, 36, 20.5, V) + box(0, 21.7, 36, 20.5, V) + box(0, 43.5, 36, 20.5, V)) },
@@ -21,7 +22,7 @@ const FORMATOS = [
   { id: 'nota', n: 'Nota de bienvenida', ok: f => f.i == 1 && f.v == 0, s: svg(box(0, 0, 36, 64, I) + `<rect x=7 y=20 width=22 height=22 fill='#fff' transform='rotate(-5 18 31)'/><circle cx=18 cy=20 r=2.4 fill='${V}'/>`) },
   { id: 'idea', n: 'Como me lo imagino', ok: () => true, s: svg(box(6, 20, 24, 3, T) + box(6, 28, 24, 3, T) + box(6, 36, 15, 3, T)) },
 ];
-const ESTADOS = { subiendo: 'Subiendo', en_cola: 'En cola', editando: 'Claude está editando', corrigiendo: 'Claude está corrigiendo', lista: 'Lista', publicada: 'Publicada', error: 'Problema' };
+const ESTADOS = { subiendo: 'Subiendo', en_cola: 'En cola', editando: 'Claude está editando', corrigiendo: 'Claude está corrigiendo', lista: 'Lista', textos: 'Textos listos', publicada: 'Publicada', error: 'Problema' };
 
 let base = '', token = ls.get('h_token', ''), tab = 'nueva', state = { jobs: [] }, agenda = [], online = false;
 let picked = [], zona = ls.get('h_zona', ''), formato = 'auto', sending = false, draft = { desc: '', idea: '' };
@@ -50,7 +51,7 @@ async function refresh() {
     state = await r.json();
     setConn(true, 'PC conectado');
     const cur = JSON.stringify(state.jobs.map(j => [j.id, j.status, j.versions.length]));
-    if (cur != prev) { const was = JSON.parse(prev); const ready = state.jobs.filter(j => j.status == 'lista' && !was.some(w => w[0] == j.id && w[1] == 'lista' && w[2] == j.versions.length)); if (ready.length && was.length) { toast('Tu historia está lista'); if (navigator.vibrate) navigator.vibrate([60, 40, 60]) } rLista() }
+    if (cur != prev) { const was = JSON.parse(prev); const ready = state.jobs.filter(j => ['lista', 'textos'].includes(j.status) && !was.some(w => w[0] == j.id && w[1] == j.status && w[2] == j.versions.length)); if (ready.length && was.length) { toast(ready[0].status == 'textos' ? 'Tus textos están listos' : 'Tu historia está lista'); if (navigator.vibrate) navigator.vibrate([60, 40, 60]) } rLista() }
     rNav(); rFalta();
   } catch (e) {
     if (e.message == 'pin') return;
@@ -140,6 +141,7 @@ function jobCard(j) {
   return `<div class=card data-job=${j.id}><span class='st ${esc(j.status)} ${busy ? 'work' : ''}'>${ESTADOS[j.status] || esc(j.status)}</span> <span class='xs mut'>${t} · ${esc(j.zona)}</span>
   <p class=sm>${esc(j.desc) || '<span class=mut>Sin descripción</span>'}</p>
   ${j.error ? `<p class=sm style='color:var(--red)'>${esc(j.error)}</p>` : ''}
+  ${j.options?.length ? `<p class='xs mut'>Toca un texto para copiarlo.</p>` + j.options.map((t, i) => `<div class=opt><button class=copy data-copy='${esc(t)}'>${esc(t)}</button><button class=mk data-mk=${j.id}_${i} aria-label='Armar historia con este texto'>Armar</button></div>`).join('') + (v ? '' : `<details style='margin-top:9px'><summary class=sm style='min-height:40px;line-height:40px;cursor:pointer'>Quiero otras opciones</summary><textarea id=fb_${j.id} rows=2 placeholder='Ej.: más cortos, que mencionen el panel…'></textarea><p></p><button class='btn alt' data-fb=${j.id}>Pedir otras</button></details>`) : ''}
   ${v ? `<video class=pv controls playsinline preload=none poster='${media(j.id, `v${v.n}.jpg`)}' src='${media(j.id, `v${v.n}_preview.mp4`)}'></video>${v.note ? `<p class=sm>${esc(v.note)}</p>` : ''}
   <div class=row><button class=btn data-share=${j.id}_${v.n}>Compartir a Instagram</button><a class='btn alt' style='display:grid;place-items:center;text-decoration:none;box-sizing:border-box' href='${media(j.id, `v${v.n}.mp4`, 1)}'>Descargar</a></div>
   <details style='margin-top:9px'><summary class=sm style='min-height:40px;line-height:40px;cursor:pointer'>Algo no me cuadra</summary><textarea id=fb_${j.id} rows=2 placeholder='Dime qué cambio: texto, recorte, formato…'></textarea><p></p><button class='btn alt' data-fb=${j.id}>Enviar corrección</button></details>
@@ -206,8 +208,15 @@ document.addEventListener('click', async e => {
   if (D.share) { const [id, n] = D.share.split('_'); shareVideo(id, n, b) }
   if (D.pub) { await api(`/api/jobs/${D.pub}/status`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: 'publicada' }) }); await refresh(); rLista() }
   if (D.fb) { const t = $('fb_' + D.fb).value.trim(); if (!t) return; document.activeElement.blur(); b.disabled = true; await api(`/api/jobs/${D.fb}/feedback`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: t }) }); toast('Recibido. Ya lo corrijo'); await refresh(); rLista() }
+  if (D.copy) { await copyText(D.copy); b.classList.add('ok'); setTimeout(() => b.classList.remove('ok'), 1500); toast('Copiado') }
+  if (D.mk) { const [id, i] = D.mk.split('_'), t = state.jobs.find(j => j.id == id).options[+i]; b.disabled = true; await api(`/api/jobs/${id}/choose`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: t }) }); toast('Listo, la armo con ese texto'); await refresh(); rLista() }
   if (b.id == 'enter') login();
 });
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t) } catch (e) {
+    const a = document.createElement('textarea'); a.value = t; document.body.append(a); a.select(); document.execCommand('copy'); a.remove();
+  }
+}
 async function login() {
   $('loginErr').textContent = '';
   try {

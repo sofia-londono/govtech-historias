@@ -79,10 +79,25 @@ def do_render(job_id, spec_path, note=""):
     print(f"ok v{n} {time.time() - t0:.0f}s {out}")
 
 
+def texts(job_id, path):
+    """Saves text options (a JSON list of strings) for the phone to copy."""
+    options = json.loads(Path(path).read_text(encoding="utf-8"))
+    bad = [t for t in options if renderer.EMOJI.search(t)]
+    if bad:
+        raise ValueError(f"emoji in: {bad}")
+    job = store.read(job_id)
+    for fb in job["feedback"]:
+        fb["done"] = True
+    job["options"] = options
+    job["status"] = "textos"
+    store.write(job)
+    print(f"ok {len(options)} options")
+
+
 def fail(job_id, message):
     store.update(job_id, status="error", error=message[:400])
 
 
 if __name__ == "__main__":
     cmd, *args = sys.argv[1:]
-    {"pending": pending, "show": show, "start": start, "render": do_render, "fail": fail}[cmd](*args)
+    {"pending": pending, "show": show, "start": start, "render": do_render, "texts": texts, "fail": fail}[cmd](*args)

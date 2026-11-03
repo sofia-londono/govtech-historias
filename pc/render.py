@@ -6,7 +6,7 @@ Spec:
   text:   TEXT for the whole story (stack and note use this one)
   duration: seconds for stack and note
 
-TEXT: {lines: [..], style: "plain"|"box", size?: int, pos?: "low"|"mid", font?: "raleway"|"inter"|"tall"|"bask"}
+TEXT: {lines: [..], style: "plain"|"box", size?: int, pos?: "low"|"mid", font?: "raleway"|"inter"|"tall"|"bask", scrim?: bool}
 Wrap a word in [[ ]] to paint it in the event blue.
 """
 import json
@@ -26,9 +26,11 @@ register_heif_opener()
 HERE = Path(__file__).resolve().parent
 FONTS = HERE / "fonts"
 FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
-W, H = 1080, 1920
+# 9:20 fills tall phones like the Galaxy S20+; on 9:16 screens Instagram trims about 240 px
+# at the top and bottom, so text stays inside the central 1080x1920.
+W, H = 1080, 2400
 FPS = 30
-BOTTOM = 1540  # above Instagram's reply bar
+BOTTOM = H - 620  # above Instagram's reply bar, and inside the 9:16 area
 WHITE = (255, 255, 255, 255)
 BLUE = (59, 169, 240, 255)
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"}
@@ -115,7 +117,7 @@ def text_layer(spec):
             raise ValueError(f"emoji in text: {ln}")
     family = spec.get("font", "raleway")
     box = spec.get("style", "plain") == "box"
-    size = spec.get("size", 60)
+    size = spec.get("size", 46)
     max_w = W - (240 if box else 160)
     stretch = 1.25 if family == "tall" else 1.0
     while True:
@@ -144,14 +146,15 @@ def text_layer(spec):
         y += img.height + gap
     if not box:
         shadow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        shadow.putalpha(words.getchannel("A").point(lambda a: a * 0.8))
-        layer.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(14)))
+        shadow.putalpha(words.getchannel("A").point(lambda a: a * 0.85))
+        layer.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(10)))
+        layer.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(3)))
     layer.alpha_composite(words)
     return layer
 
 
 def scrim():
-    a = np.clip((np.arange(H) - 1050) / 500, 0, 1) ** 1.4 * 165
+    a = np.clip((np.arange(H) - (H - 870)) / 500, 0, 1) ** 1.4 * 165
     img = np.zeros((H, W, 4), np.uint8)
     img[..., 3] = a[:, None].astype(np.uint8)
     return Image.fromarray(img, "RGBA")
@@ -181,7 +184,7 @@ def source(item, idx, tmp, w, h, dur):
             f"scale={w * 2}:{h * 2}:force_original_aspect_ratio=increase:flags=lanczos,"
             f"crop={w * 2}:{h * 2}:(iw-{w * 2})*{fx}:(ih-{h * 2})*{fy},"
             f"zoompan=z='1+0.05*on/{n}':x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2':d={n}:s={w}x{h}:fps={FPS},"
-            f"{LOOK},setsar=1,format=yuv420p,trim=duration={dur},setpts=PTS-STARTPTS"
+            f"{LOOK},scale=in_range=pc:out_range=tv,setsar=1,format=yuv420p,trim=duration={dur},setpts=PTS-STARTPTS"
         )
         return ["-i", str(prepare_image(src, tmp, idx))], chain, False
     info = probe(src)
@@ -202,7 +205,7 @@ def source(item, idx, tmp, w, h, dur):
 
 ENCODE = [
     "-c:v", "libx264", "-preset", "medium", "-crf", "17", "-profile:v", "high", "-pix_fmt", "yuv420p",
-    "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-r", str(FPS),
+    "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-color_range", "tv", "-r", str(FPS),
     "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart",
 ]
 
@@ -234,7 +237,7 @@ def render_cuts(spec, out, tmp):
         layer = text_layer(text)
         if layer:
             full = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-            if text.get("style", "plain") == "plain":
+            if text.get("scrim"):
                 full.alpha_composite(shade)
             full.alpha_composite(layer)
             inputs += overlay_input(full, tmp, f"t{i}")
@@ -362,7 +365,7 @@ def render_note(spec, out, tmp):
     shadow = Image.new("L", (size + 160, size + 160), 0)
     ImageDraw.Draw(shadow).rectangle([80, 90, size + 80, size + 100], fill=170)
     shadow = shadow.filter(ImageFilter.GaussianBlur(26))
-    cx, cy = W // 2, 880
+    cx, cy = W // 2, H // 2 - 80
     frames = round(dur * FPS)
     enc = subprocess.Popen(
         [FFMPEG, "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-",
@@ -370,7 +373,7 @@ def render_note(spec, out, tmp):
         stdin=subprocess.PIPE, stderr=subprocess.PIPE,
     )
     under_rot = under.rotate(3.5, Image.BICUBIC, expand=True)
-    grid_x, grid_y = (120, W - 120), (420, 1500)
+    grid_x, grid_y = (120, W - 120), (cy - 460, cy + 620)
     for n in range(frames):
         t = n / FPS
         zoom = 1 + 0.08 * (1 - t / dur)
@@ -418,8 +421,8 @@ def previews(out):
     out = Path(out)
     prev = out.with_name(out.stem + "_preview.mp4")
     poster = out.with_name(out.stem + ".jpg")
-    run([FFMPEG, "-y", "-v", "error", "-i", str(out), "-vf", "scale=540:960:flags=lanczos", "-c:v", "libx264", "-preset", "veryfast", "-crf", "27", "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", str(prev)])
-    run([FFMPEG, "-y", "-v", "error", "-ss", "1.9", "-i", str(out), "-frames:v", "1", "-vf", "scale=540:960", "-q:v", "4", str(poster)])
+    run([FFMPEG, "-y", "-v", "error", "-i", str(out), "-vf", f"scale=540:{H // 2}:flags=lanczos", "-c:v", "libx264", "-preset", "veryfast", "-crf", "27", "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", str(prev)])
+    run([FFMPEG, "-y", "-v", "error", "-ss", "1.9", "-i", str(out), "-frames:v", "1", "-vf", f"scale=540:{H // 2}", "-q:v", "4", str(poster)])
     return prev, poster
 
 

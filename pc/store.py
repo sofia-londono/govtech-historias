@@ -93,5 +93,5 @@ def summaries():
     for d in JOBS.iterdir():
         job = read(d.name)
         if job and job["status"] != "descartada":
-            out.append({k: job[k] for k in ("id", "created", "status", "zona", "desc", "formato", "versions", "feedback")} | {"count": len(job["files"]), "error": job.get("error")})
+            out.append({k: job[k] for k in ("id", "created", "status", "zona", "desc", "formato", "versions", "feedback")} | {"count": len(job["files"]), "error": job.get("error"), "options": job.get("options", [])})
     return sorted(out, key=lambda j: -j["created"])
