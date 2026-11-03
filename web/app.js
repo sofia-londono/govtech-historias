@@ -17,6 +17,7 @@ const FORMATOS = [
   { id: 'imagen_texto', n: 'Imagen + texto', ok: f => f.i == 1 && f.v == 0, s: svg(box(0, 0, 36, 64, I) + box(6, 44, 24, 9, T)) },
   { id: 'tres_videos', n: 'Tres videos', ok: f => f.v == 3 && f.i == 0, s: svg(box(0, 0, 36, 20.5, V) + box(0, 21.7, 36, 20.5, V) + box(0, 43.5, 36, 20.5, V)) },
   { id: 'img_vid_img', n: 'Imagen, video, imagen', ok: f => f.v == 1 && f.i == 2, s: svg(box(0, 0, 36, 20.5, I) + box(0, 21.7, 36, 20.5, V) + box(0, 43.5, 36, 20.5, I)) },
+  { id: 'collage', n: 'Collage de fotos', ok: f => f.i >= 2 && f.v == 0, s: svg(box(0, 0, 17.4, 20.5, I) + box(18.6, 0, 17.4, 20.5, V) + box(0, 21.7, 17.4, 20.5, V) + box(18.6, 21.7, 17.4, 20.5, I) + box(0, 43.5, 36, 20.5, I)) },
   { id: 'cortes', n: 'Cortes rápidos', ok: f => f.v + f.i >= 2, s: svg(box(2, 4, 10, 56, V) + box(13, 4, 10, 56, I) + box(24, 4, 10, 56, V)) },
   { id: 'frase', n: 'Frase de speaker', ok: f => f.v == 1 && f.i == 0, s: svg(box(0, 0, 36, 64, V) + box(5, 36, 26, 3, T) + box(8, 42, 20, 3, T)) },
   { id: 'nota', n: 'Nota de bienvenida', ok: f => f.i == 1 && f.v == 0, s: svg(box(0, 0, 36, 64, I) + `<rect x=7 y=20 width=22 height=22 fill='#fff' transform='rotate(-5 18 31)'/><circle cx=18 cy=20 r=2.4 fill='${V}'/>`) },

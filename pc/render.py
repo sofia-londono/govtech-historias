@@ -319,6 +319,44 @@ def render_stack(spec, out, tmp):
     run([FFMPEG, "-y", "-v", "error", *inputs, "-filter_complex", ";".join(parts), "-map", "[v]", "-map", "[a]", "-t", str(dur), *ENCODE, str(out)])
 
 
+def render_grid(spec, out, tmp):
+    """Collage: one column up to 3 items, two columns from 4; an odd last item spans the row."""
+    items = spec["items"]
+    dur = spec.get("duration", 6)
+    n = len(items)
+    cols = 1 if n <= 3 else 2
+    rows = -(-n // cols)
+    line = 8
+    rh = (H - line * (rows - 1)) // rows
+    rh -= rh % 2
+    cells = []
+    for i in range(n):
+        r, c = divmod(i, cols)
+        span = cols if (i == n - 1 and n % cols) else 1
+        cw = W if span == cols else (W - line * (cols - 1)) // cols
+        cw -= cw % 2
+        cells.append((c * (cw + line), r * (rh + line), cw))
+    inputs, parts = [], []
+    for i, (item, (x, y, cw)) in enumerate(zip(items, cells)):
+        args, chain, _ = source({**item, "audio": False}, i, tmp, cw, rh, dur)
+        inputs += args
+        parts.append(f"[{i}:v]{chain}[r{i}]")
+    parts.append(f"color=c=white:s={W}x{H}:r={FPS}:d={dur},format=yuv420p[bg]")
+    last = "bg"
+    for i, (x, y, _) in enumerate(cells):
+        parts.append(f"[{last}][r{i}]overlay={x}:{y}[s{i}]")
+        last = f"s{i}"
+    layer = text_layer(spec.get("text"))
+    if layer:
+        inputs += overlay_input(layer, tmp, "t")
+        parts.append(f"[{n}:v]format=rgba,fade=t=in:st=0.2:d=0.3:alpha=1,trim=duration={dur},setpts=PTS-STARTPTS[o]")
+        parts.append(f"[{last}][o]overlay=shortest=1,format=yuv420p[v]")
+    else:
+        parts.append(f"[{last}]format=yuv420p[v]")
+    parts.append(f"anullsrc=r=48000:cl=stereo,atrim=duration={dur}[a]")
+    run([FFMPEG, "-y", "-v", "error", *inputs, "-filter_complex", ";".join(parts), "-map", "[v]", "-map", "[a]", "-t", str(dur), *ENCODE, str(out)])
+
+
 def paper_sheet(size, seed):
     rng = np.random.default_rng(seed)
     noise = rng.normal(0, 3.2, (size, size)).astype(np.float32)
@@ -480,7 +518,7 @@ def previews(out):
 
 def render(spec, out):
     with tempfile.TemporaryDirectory() as tmp:
-        {"cuts": render_cuts, "stack": render_stack, "note": render_note}[spec["layout"]](spec, out, tmp)
+        {"cuts": render_cuts, "stack": render_stack, "grid": render_grid, "note": render_note}[spec["layout"]](spec, out, tmp)
     return previews(out)
 
 
