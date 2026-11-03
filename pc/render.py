@@ -346,11 +346,14 @@ def render_note(spec, out, tmp):
     paper = paper_sheet(size, 1)
     under = paper_sheet(size, 2)
     rows = []
-    f1 = font("inter", 58, 500)
+    # Raleway Bold like the rest of the stories; "inter" keeps the campaign's stretched title
+    family = note.get("font", "raleway")
+    small_w, big_w, big_stretch = (700, 800, 1.0) if family == "raleway" else (500, 800, 1.28)
+    f1 = font(family, 58, small_w)
     fit = 250
-    while font("inter", fit, 800).getlength(big) > size - 120:
+    while font(family, fit, big_w).getlength(big) > size - 120:
         fit -= 6
-    for text, f, fill, stretch in ((small1, f1, (25, 25, 28, 255), 1.0), (big, font("inter", fit, 800), BLUE, 1.28), (small2, f1, (25, 25, 28, 255), 1.0)):
+    for text, f, fill, stretch in ((small1, f1, (25, 25, 28, 255), 1.0), (big, font(family, fit, big_w), BLUE, big_stretch), (small2, f1, (25, 25, 28, 255), 1.0)):
         rows.append(draw_line(text, f, fill, stretch))
     total = sum(r.height for r in rows) + 40
     y = (size - total) // 2 + 20
