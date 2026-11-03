@@ -385,7 +385,7 @@ def notepad_design(design, cells, rh, labels):
     shade = 246 - 14 * ((xx / W) * 0.5 + (yy / H) * 0.5)
     page = Image.fromarray(np.stack([shade, shade - 2, shade - 6], -1).clip(0, 255).astype(np.uint8), "RGB").convert("RGBA")
     m = design.get("pad_margin", 52)
-    top_pad, bot_pad = design["top"] - 250, design["bottom"] + 70
+    top_pad, bot_pad = design["top"] - 250, design.get("pad_bottom", design["bottom"] + 70)
     pw, ph = W - 2 * m, bot_pad - top_pad
 
     def sheet(color, angle, dx, dy):
@@ -423,6 +423,24 @@ def notepad_design(design, cells, rh, labels):
     for im in imgs:
         page.alpha_composite(im, ((W - im.width) // 2, y))
         y += im.height + 4
+    # optional agenda under the photos: [time, title] rows
+    if design.get("body"):
+        y = design["bottom"] + 70
+        if design.get("body_title"):
+            bt = draw_line(design["body_title"], font("raleway", 40, 700), WHITE)
+            page.alpha_composite(bt, (m + 60, y))
+            y += bt.height + 26
+        ft, fb = font("raleway", 38, 700), font("raleway", 33, 600)
+        for when, what in design["body"]:
+            tl = draw_line(when, ft, BLUE)
+            page.alpha_composite(tl, (m + 60, y))
+            lines = wrap(what, fb, pw - 120 - 190)
+            yy = y + 4
+            for ln in lines:
+                li = draw_line(ln, fb, (235, 235, 235, 255))
+                page.alpha_composite(li, (m + 60 + 190, yy))
+                yy += li.height
+            y = max(y + tl.height, yy) + 26
     # photo windows with a thin blue frame
     r = design.get("radius", 22)
     bw = design.get("border", 4)
