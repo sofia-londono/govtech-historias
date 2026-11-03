@@ -342,6 +342,20 @@ def grid_design(design, cells, rh, labels):
     for (x, cy, cw), lab in zip(cells, labels):
         if not lab:
             continue
+        if isinstance(lab, dict):
+            # the brand's own logo on a white badge in the corner
+            logo = Image.open(lab["logo"]).convert("RGBA")
+            sc = min(260 / logo.width, 58 / logo.height)
+            logo = logo.resize((round(logo.width * sc), round(logo.height * sc)), Image.LANCZOS)
+            pad = 16
+            bx, by = x + 16, cy + 16
+            badge = [bx, by, bx + logo.width + 2 * pad, by + logo.height + 2 * pad]
+            sh = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+            ImageDraw.Draw(sh).rounded_rectangle([badge[0], badge[1] + 4, badge[2], badge[3] + 4], radius=18, fill=(0, 0, 0, 110))
+            frame.alpha_composite(sh.filter(ImageFilter.GaussianBlur(8)))
+            ImageDraw.Draw(frame).rounded_rectangle(badge, radius=18, fill=(255, 255, 255, 255))
+            frame.alpha_composite(logo, (bx + pad, by + pad))
+            continue
         txt = draw_line(lab, fp, (4, 32, 47, 255))
         pw, ph = txt.width + 36, txt.height + 10
         px, py = x + 18, cy + rh - ph - 18
