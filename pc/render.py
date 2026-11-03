@@ -377,6 +377,85 @@ def grid_design(design, cells, rh, labels):
     return frame
 
 
+def notepad_design(design, cells, rh, labels):
+    """The campaign's notepad look: warm white page, a black spiral notepad holding the photos,
+    a blue and a white sheet peeking out behind it, title in the event blue."""
+    s = 2
+    yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+    shade = 246 - 14 * ((xx / W) * 0.5 + (yy / H) * 0.5)
+    page = Image.fromarray(np.stack([shade, shade - 2, shade - 6], -1).clip(0, 255).astype(np.uint8), "RGB").convert("RGBA")
+    m = design.get("pad_margin", 52)
+    top_pad, bot_pad = design["top"] - 250, design["bottom"] + 70
+    pw, ph = W - 2 * m, bot_pad - top_pad
+
+    def sheet(color, angle, dx, dy):
+        im = Image.new("RGBA", (pw + 200, ph + 200), (0, 0, 0, 0))
+        ImageDraw.Draw(im).rectangle([100, 100, 100 + pw, 100 + ph], fill=color)
+        sh = Image.new("RGBA", im.size, (0, 0, 0, 0))
+        ImageDraw.Draw(sh).rectangle([100, 112, 100 + pw, 112 + ph], fill=(0, 0, 0, 90))
+        sh = sh.filter(ImageFilter.GaussianBlur(18))
+        sh.alpha_composite(im)
+        sh = sh.rotate(angle, Image.BICUBIC)
+        page.alpha_composite(sh, (m - 100 + dx, top_pad - 100 + dy))
+
+    sheet((250, 250, 248, 255), 3.0, 34, 40)
+    sheet(BLUE, -3.2, -30, -24)
+    sheet((22, 22, 24, 255), 0, 0, 0)
+    # spiral rings along the top edge
+    rings = Image.new("RGBA", (W * s, H * s), (0, 0, 0, 0))
+    rd = ImageDraw.Draw(rings)
+    n = 12
+    for i in range(n):
+        cx = (m + 40 + i * (pw - 80) / (n - 1)) * s
+        cy = (top_pad + 8) * s
+        rd.rounded_rectangle([cx - 5 * s, cy, cx + 5 * s, cy + 46 * s], radius=5 * s, fill=(70, 70, 74, 255))
+        rd.ellipse([cx - 17 * s, cy - 17 * s, cx + 17 * s, cy + 17 * s], fill=(228, 228, 230, 255))
+        rd.ellipse([cx - 9 * s, cy - 13 * s, cx + 3 * s, cy - 3 * s], fill=(255, 255, 255, 255))
+    rings = rings.resize((W, H), Image.LANCZOS)
+    rsh = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    rsh.putalpha(rings.getchannel("A").point(lambda a: a * 0.5))
+    page.alpha_composite(rsh.filter(ImageFilter.GaussianBlur(4)), (0, 5))
+    page.alpha_composite(rings)
+    # title in the event blue on the notepad
+    title = design.get("title") or []
+    imgs = [draw_line(t, font("raleway", 58 if i == 0 else 36, 700 if i == 0 else 600), BLUE if i == 0 else (235, 235, 235, 255)) for i, t in enumerate(title)]
+    y = top_pad + 95
+    for im in imgs:
+        page.alpha_composite(im, ((W - im.width) // 2, y))
+        y += im.height + 4
+    # photo windows with a thin blue frame
+    r = design.get("radius", 22)
+    bw = design.get("border", 4)
+    edge = Image.new("L", (W * s, H * s), 0)
+    hole = Image.new("L", (W * s, H * s), 255)
+    ed, hd = ImageDraw.Draw(edge), ImageDraw.Draw(hole)
+    for x, y0, cw in cells:
+        ed.rounded_rectangle([(x - bw) * s, (y0 - bw) * s, (x + cw + bw) * s - 1, (y0 + rh + bw) * s - 1], radius=(r + bw) * s, fill=255)
+        ed.rounded_rectangle([x * s, y0 * s, (x + cw) * s - 1, (y0 + rh) * s - 1], radius=r * s, fill=0)
+        hd.rounded_rectangle([x * s, y0 * s, (x + cw) * s - 1, (y0 + rh) * s - 1], radius=r * s, fill=0)
+    blue = Image.new("RGBA", (W, H), BLUE)
+    blue.putalpha(edge.resize((W, H), Image.LANCZOS))
+    page.alpha_composite(blue)
+    page.putalpha(Image.fromarray(np.minimum(np.asarray(page.getchannel("A")), np.asarray(hole.resize((W, H), Image.LANCZOS)))))
+    for (x, cy, cw), lab in zip(cells, labels):
+        if isinstance(lab, dict):
+            logo_badge(page, lab["logo"], x, cy)
+    return page
+
+
+def logo_badge(frame, path, x, y):
+    logo = Image.open(path).convert("RGBA")
+    sc = min(240 / logo.width, 52 / logo.height)
+    logo = logo.resize((round(logo.width * sc), round(logo.height * sc)), Image.LANCZOS)
+    pad, bx, by = 14, x + 14, y + 14
+    badge = [bx, by, bx + logo.width + 2 * pad, by + logo.height + 2 * pad]
+    sh = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ImageDraw.Draw(sh).rounded_rectangle([badge[0], badge[1] + 4, badge[2], badge[3] + 4], radius=16, fill=(0, 0, 0, 110))
+    frame.alpha_composite(sh.filter(ImageFilter.GaussianBlur(8)))
+    ImageDraw.Draw(frame).rounded_rectangle(badge, radius=16, fill=(255, 255, 255, 255))
+    frame.alpha_composite(logo, (bx + pad, by + pad))
+
+
 def render_grid(spec, out, tmp):
     """Collage: one column up to 3 items, two columns from 4; an odd last item spans the row.
     With "design": {title, top, bottom, margin, gap, radius} it sits on black with rounded photos."""
@@ -410,7 +489,8 @@ def render_grid(spec, out, tmp):
         last = f"s{i}"
     layer = text_layer(spec.get("text"))
     if design:
-        frame = grid_design(design, cells, rh, [it.get("label") for it in items])
+        builder = notepad_design if design.get("style") == "notepad" else grid_design
+        frame = builder(design, cells, rh, [it.get("label") for it in items])
         if layer:
             frame.alpha_composite(layer)
         layer = frame
