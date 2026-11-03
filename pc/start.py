@@ -19,8 +19,13 @@ URL = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com")
 def publish(url):
     (WEB / "tunnel.json").write_text(json.dumps({"url": url, "ts": time.time()}))
     npx = shutil.which("npx") or "npx"
-    r = subprocess.run([npx, "--no-install", "vercel", "deploy", "--prod", "--yes"], cwd=WEB, capture_output=True, text=True, errors="replace")
-    print("published" if r.returncode == 0 else f"publish failed: {r.stderr[-400:]}", url, flush=True)
+    for attempt in range(4):
+        r = subprocess.run([npx, "--no-install", "vercel", "deploy", "--prod", "--yes"], cwd=WEB, capture_output=True, text=True, errors="replace")
+        if r.returncode == 0:
+            print("published", url, flush=True)
+            return
+        print(f"publish failed (attempt {attempt + 1}): {r.stderr[-300:]}", flush=True)
+        time.sleep(10)
 
 
 def tunnel():
