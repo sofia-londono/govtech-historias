@@ -677,6 +677,89 @@ def render_agenda(spec, out, tmp):
     run([FFMPEG, "-y", "-v", "error", *inputs, "-filter_complex", ";".join(parts), "-map", "[v]", "-map", "[a]", "-t", str(dur), *ENCODE, str(out)])
 
 
+def render_postcard(spec, out, tmp):
+    """Thank-you postcard: the clip as the picture side over a blurred black-and-white copy,
+    the message, a stamp and a Bogotá postmark."""
+    dur = spec.get("duration", 9)
+    pc = spec["postcard"]
+    item = {**spec["items"][0], "audio": False}
+    x0, y0, cw = 70, 400, W - 140
+    wx, wy, ww = x0 + 36, y0 + 36, cw - 72
+    wh = round(ww * 9 / 16) // 2 * 2
+    a1, c1, _ = source(item, 0, tmp, W, H, dur)
+    a2, c2, _ = source(item, 1, tmp, ww, wh, dur)
+    c1 += ",hue=s=0,boxblur=18:2,eq=brightness=-0.22"
+    ink, grey = (25, 25, 28, 255), (120, 124, 130, 255)
+    ft, fm, fa = font("raleway", 56, 700), font("raleway", 34, 600), font("raleway", 28, 600)
+    card = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(card)
+    # message block, measured first so the card fits it
+    ty = wy + wh + 50
+    title = draw_line(pc["title"], ft, BLUE)
+    msg = [draw_line(ln, fm, ink) for ln in wrap(pc["message"], fm, ww - 20)]
+    addr = [draw_line(t, fa, grey) for t in pc.get("address", [])]
+    msg_y = ty + title.height + 200
+    end_y = msg_y + sum(m.height for m in msg) + 30 + sum(a.height + 30 for a in addr)
+    ch = end_y - y0 + 40
+    sh = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ImageDraw.Draw(sh).rounded_rectangle([x0, y0 + 24, x0 + cw, y0 + ch + 24], radius=26, fill=(0, 0, 0, 170))
+    card.alpha_composite(sh.filter(ImageFilter.GaussianBlur(24)))
+    d.rounded_rectangle([x0, y0, x0 + cw, y0 + ch], radius=26, fill=(249, 248, 244, 255))
+    # window for the clip, cut out of the card
+    hole = Image.new("L", (W * 2, H * 2), 255)
+    ImageDraw.Draw(hole).rounded_rectangle([wx * 2, wy * 2, (wx + ww) * 2 - 1, (wy + wh) * 2 - 1], radius=36, fill=0)
+    card.putalpha(Image.fromarray(np.minimum(np.asarray(card.getchannel("A")), np.asarray(hole.resize((W, H), Image.LANCZOS)))))
+    card.alpha_composite(title, (wx, ty))
+    # stamp: perforated edge, blue face, event name; postmark rings over its corner
+    sw, shh = 190, 220
+    sx, sy = wx + ww - sw, ty - 10
+    st = Image.new("RGBA", (sw, shh), (0, 0, 0, 0))
+    sd = ImageDraw.Draw(st)
+    sd.rectangle([0, 0, sw - 1, shh - 1], fill=(255, 255, 255, 255))
+    for k in range(0, sw, 16):
+        sd.ellipse([k - 5, -5, k + 5, 5], fill=(0, 0, 0, 0))
+        sd.ellipse([k - 5, shh - 5, k + 5, shh + 5], fill=(0, 0, 0, 0))
+    for k in range(0, shh, 16):
+        sd.ellipse([-5, k - 5, 5, k + 5], fill=(0, 0, 0, 0))
+        sd.ellipse([sw - 5, k - 5, sw + 5, k + 5], fill=(0, 0, 0, 0))
+    sd.rectangle([14, 14, sw - 15, shh - 15], fill=BLUE)
+    for i, (t, sz) in enumerate(pc.get("stamp", [])):
+        li = draw_line(t, font("raleway", sz, 800 if i == 0 else 700), WHITE)
+        st.alpha_composite(li, ((sw - li.width) // 2, 40 + i * 56))
+    card.alpha_composite(st.rotate(4, Image.BICUBIC, expand=True), (sx - 6, sy))
+    if pc.get("postmark"):
+        pm = Image.new("RGBA", (420, 220), (0, 0, 0, 0))
+        pd = ImageDraw.Draw(pm)
+        pd.ellipse([20, 20, 200, 200], outline=(40, 40, 46, 190), width=5)
+        pd.ellipse([38, 38, 182, 182], outline=(40, 40, 46, 150), width=3)
+        for k, line_t in enumerate(pc["postmark"]):
+            li = draw_line(line_t, font("raleway", 24 if k else 26, 800), (40, 40, 46, 200))
+            pm.alpha_composite(li, (110 - li.width // 2, 76 + k * 36))
+        for k in range(3):
+            pts = [(205 + j * 6, 70 + k * 30 + 8 * np.sin(j / 2.2)) for j in range(26)]
+            pd.line(pts, fill=(40, 40, 46, 160), width=4)
+        card.alpha_composite(pm.rotate(-10, Image.BICUBIC, expand=True), (sx - 330, sy + 40))
+    y = msg_y
+    for m in msg:
+        card.alpha_composite(m, (wx, y))
+        y += m.height
+    y += 30
+    for a in addr:
+        card.alpha_composite(a, (wx, y))
+        d.line([(wx, y + a.height + 8), (wx + ww, y + a.height + 8)], fill=(205, 205, 208, 255), width=2)
+        y += a.height + 30
+    inputs = a1 + a2 + overlay_input(card, tmp, "card")
+    parts = [
+        f"[0:v]{c1}[bg]",
+        f"[1:v]{c2}[win]",
+        f"[bg][win]overlay={wx}:{wy}[s0]",
+        f"[2:v]format=rgba,fade=t=in:st=0:d=0.5:alpha=1,trim=duration={dur},setpts=PTS-STARTPTS[c]",
+        "[s0][c]overlay=shortest=1,format=yuv420p[v]",
+        f"anullsrc=r=48000:cl=stereo,atrim=duration={dur}[a]",
+    ]
+    run([FFMPEG, "-y", "-v", "error", *inputs, "-filter_complex", ";".join(parts), "-map", "[v]", "-map", "[a]", "-t", str(dur), *ENCODE, str(out)])
+
+
 def paper_sheet(size, seed):
     rng = np.random.default_rng(seed)
     noise = rng.normal(0, 3.2, (size, size)).astype(np.float32)
@@ -838,7 +921,7 @@ def previews(out):
 
 def render(spec, out):
     with tempfile.TemporaryDirectory() as tmp:
-        {"cuts": render_cuts, "stack": render_stack, "grid": render_grid, "split": render_split, "agenda": render_agenda, "note": render_note}[spec["layout"]](spec, out, tmp)
+        {"cuts": render_cuts, "stack": render_stack, "grid": render_grid, "split": render_split, "agenda": render_agenda, "postcard": render_postcard, "note": render_note}[spec["layout"]](spec, out, tmp)
     return previews(out)
 
 
