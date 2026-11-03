@@ -138,14 +138,15 @@ async function retry(fn, okCodes = []) {
 function jobCard(j) {
   const v = j.versions[j.versions.length - 1], busy = ['en_cola', 'editando', 'corrigiendo', 'subiendo'].includes(j.status);
   const t = new Date(j.created * 1000).toLocaleTimeString('es-CO', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Bogota' });
+  const opts = j.options?.length ? `${v ? `<h2>Otros textos</h2>` : ''}<p class='xs mut'>Toca un texto para copiarlo${v ? ', o Usar para que rehaga la historia con ese' : ''}.</p>` + j.options.map((t, i) => `<div class=opt><button class=copy data-copy='${esc(t)}'>${esc(t)}</button><button class=mk data-mk=${j.id}_${i} aria-label='Armar historia con este texto'>${v ? 'Usar' : 'Armar'}</button></div>`).join('') + (v ? '' : `<details style='margin-top:9px'><summary class=sm style='min-height:40px;line-height:40px;cursor:pointer'>Quiero otras opciones</summary><textarea id=fb_${j.id} rows=2 placeholder='Ej.: más cortos, que mencionen el panel…'></textarea><p></p><button class='btn alt' data-fb=${j.id}>Pedir otras</button></details>`) : '';
   return `<div class=card data-job=${j.id}><span class='st ${esc(j.status)} ${busy ? 'work' : ''}'>${ESTADOS[j.status] || esc(j.status)}</span> <span class='xs mut'>${t} · ${esc(j.zona)}</span>
   <p class=sm>${esc(j.desc) || '<span class=mut>Sin descripción</span>'}</p>
   ${j.error ? `<p class=sm style='color:var(--red)'>${esc(j.error)}</p>` : ''}
-  ${j.options?.length ? `<p class='xs mut'>Toca un texto para copiarlo.</p>` + j.options.map((t, i) => `<div class=opt><button class=copy data-copy='${esc(t)}'>${esc(t)}</button><button class=mk data-mk=${j.id}_${i} aria-label='Armar historia con este texto'>Armar</button></div>`).join('') + (v ? '' : `<details style='margin-top:9px'><summary class=sm style='min-height:40px;line-height:40px;cursor:pointer'>Quiero otras opciones</summary><textarea id=fb_${j.id} rows=2 placeholder='Ej.: más cortos, que mencionen el panel…'></textarea><p></p><button class='btn alt' data-fb=${j.id}>Pedir otras</button></details>`) : ''}
+  ${v ? '' : opts}
   ${v ? `<video class=pv controls playsinline preload=none poster='${media(j.id, `v${v.n}.jpg`)}' src='${media(j.id, `v${v.n}_preview.mp4`)}'></video>${v.note ? `<p class=sm>${esc(v.note)}</p>` : ''}
   <div class=row><button class=btn data-share=${j.id}_${v.n}>Compartir a Instagram</button><a class='btn alt' style='display:grid;place-items:center;text-decoration:none;box-sizing:border-box' href='${media(j.id, `v${v.n}.mp4`, 1)}'>Descargar</a></div>
   <details style='margin-top:9px'><summary class=sm style='min-height:40px;line-height:40px;cursor:pointer'>Algo no me cuadra</summary><textarea id=fb_${j.id} rows=2 placeholder='Dime qué cambio: texto, recorte, formato…'></textarea><p></p><button class='btn alt' data-fb=${j.id}>Enviar corrección</button></details>
-  ${j.status == 'lista' ? `<p></p><button class='btn alt' data-pub=${j.id}>Ya la publiqué</button>` : ''}` : ''}</div>`;
+  ${j.status == 'lista' ? `<p></p><button class='btn alt' data-pub=${j.id}>Ya la publiqué</button>` : ''}${opts}` : ''}</div>`;
 }
 function rLista() {
   const open = document.activeElement?.id?.startsWith('fb_');

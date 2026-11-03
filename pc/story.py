@@ -89,7 +89,7 @@ def texts(job_id, path):
     for fb in job["feedback"]:
         fb["done"] = True
     job["options"] = options
-    job["status"] = "textos"
+    job["status"] = "lista" if job["versions"] else "textos"
     store.write(job)
     print(f"ok {len(options)} options")
 
