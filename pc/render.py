@@ -31,9 +31,10 @@ FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
 W, H = 1080, 2400
 FPS = 30
 BOTTOM = H - 620  # above Instagram's reply bar, and inside the 9:16 area
-# Instagram draws the account name on top and the reply bar at the bottom of a story:
-# graphic elements stay between these lines (measured on a published story, 2026-11-04)
-SAFE_TOP, SAFE_BOTTOM = 440, 2040
+# Measured on published stories (2026-11-04): Instagram shows only the central 1080x1920 of
+# this canvas (y 240-2160) and draws the account name over its top and "Say something" over
+# its bottom. Every text and graphic stays between these lines, with breathing room.
+SAFE_TOP, SAFE_BOTTOM = 560, 1960
 WHITE = (255, 255, 255, 255)
 BLUE = (59, 169, 240, 255)
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"}
@@ -321,8 +322,8 @@ def render_stack(spec, out, tmp):
             rows_img = [draw_line(lab[0], fn)] + [draw_line(r, fr) for r in lab[1:]]
             h = sum(p.height for p in rows_img)
             top = i * (rh + line)
-            floor = H - 260 if items[i].get("label_low") else BOTTOM  # label_low: as low as the reply bar allows
-            y = max(top + 40, 300, min(top + rh - 40 - h, floor - h))
+            floor = SAFE_BOTTOM if items[i].get("label_low") else BOTTOM  # label_low: as low as the reply bar allows
+            y = max(top + 40, SAFE_TOP, min(top + rh - 40 - h, floor - h))
             words = Image.new("RGBA", (W, H), (0, 0, 0, 0))
             for p in rows_img:
                 words.alpha_composite(p, (56, y))
@@ -545,7 +546,7 @@ def render_grid(spec, out, tmp):
     if design:
         # leave room for the title above the photos, and keep everything in the safe area
         n_title = len(design.get("title") or [])
-        top = max(top, SAFE_TOP + (80 if n_title else 0) + 90 * max(0, n_title))
+        top = max(top, SAFE_TOP + (90 if n_title else 0) + 110 * max(0, n_title))
         bottom = min(bottom, SAFE_BOTTOM)
         design = {**design, "top": top, "bottom": bottom}
     rh = (bottom - top - line * (rows - 1)) // rows
@@ -623,7 +624,7 @@ def render_split(spec, out, tmp):
     for i, item in enumerate(items):
         if item.get("label"):
             p = pill(item["label"], fl, (4, 32, 47, 255), BLUE)
-            y = max(300, i * (rh + band) + 40) if i == 0 else min(i * (rh + band) + rh - p.height - 40, BOTTOM - p.height)
+            y = max(SAFE_TOP, i * (rh + band) + 40) if i == 0 else min(i * (rh + band) + rh - p.height - 40, BOTTOM - p.height)
             layer.alpha_composite(p, (40, y))
     text = text_layer(spec.get("text"))
     if text:
@@ -680,7 +681,7 @@ def render_agenda(spec, out, tmp):
     head_h = 340
     card_h = head_h + sum(r.height for r in row_imgs) + 40 + (70 if cal.get("footer") else 0)
     if "top" not in cal:
-        y0 = max(400, (H - card_h) // 2 - 40)  # centered, inside the area every phone shows
+        y0 = max(SAFE_TOP + 150, (H - card_h) // 2 - 40)  # centered, inside the area every phone shows
     card = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(card)
     sh = Image.new("RGBA", (W, H), (0, 0, 0, 0))
@@ -751,7 +752,7 @@ def render_postcard(spec, out, tmp):
     dur = spec.get("duration", 9)
     pc = spec["postcard"]
     item = {**spec["items"][0], "audio": False}
-    x0, y0, cw = 70, 400, W - 140
+    x0, y0, cw = 90, SAFE_TOP, W - 180
     wx, wy, ww = x0 + 36, y0 + 36, cw - 72
     wh = round(ww * 9 / 16) // 2 * 2
     a1, c1, _ = source(item, 0, tmp, W, H, dur)
@@ -847,7 +848,7 @@ def render_board(spec, out, tmp):
     bd = spec["board"]
     item = {**spec["items"][0], "audio": False}
     x0, cw = 50, W - 100
-    wy = bd.get("window_top", 430)
+    wy = bd.get("window_top", SAFE_TOP + 150)
     ww = cw
     wh = round(ww * 9 / 16) // 2 * 2
     a1, c1, _ = source(item, 0, tmp, W, H, dur)
@@ -950,7 +951,7 @@ def render_plan(spec, out, tmp):
     sub = draw_line(pl.get("subtitle", ""), font("raleway", 36, 600), BLUE) if pl.get("subtitle") else None
     rooms = pl["rooms"]
     x0, x1 = 70, W - 70
-    top = pl.get("top", 520)
+    top = pl.get("top", SAFE_TOP + 150)
     rh = pl.get("room_height", 560)
     corridor = 90
     # panel behind the plan
@@ -1046,7 +1047,7 @@ def badge_card(b, bw, bh):
     im = Image.new("RGBA", (bw * s, bh * s), (0, 0, 0, 0))
     d = ImageDraw.Draw(im)
     d.rounded_rectangle([0, 0, bw * s - 1, bh * s - 1], radius=28 * s, fill=(250, 250, 248, 255))
-    hh = 190
+    hh = b.get("header", 150)
     col = tuple(b.get("color", BLUE))
     d.rounded_rectangle([0, 0, bw * s - 1, hh * s], radius=28 * s, fill=col)
     d.rectangle([0, (hh - 30) * s, bw * s - 1, hh * s], fill=col)
@@ -1054,9 +1055,9 @@ def badge_card(b, bw, bh):
     im = im.resize((bw, bh), Image.LANCZOS)
     on = tuple(b.get("on_color", (4, 32, 47, 255)))
     kick = draw_line(b.get("kicker", "POLICY LABS"), font("inter", 24, 700), on)
-    im.alpha_composite(kick, ((bw - kick.width) // 2, 64))
+    im.alpha_composite(kick, ((bw - kick.width) // 2, 44))
     name = draw_line(b["name"], font("inter", 56, 800), tuple(b.get("name_color", WHITE)), 1.15)
-    im.alpha_composite(name, ((bw - name.width) // 2, 98))
+    im.alpha_composite(name, ((bw - name.width) // 2, 72))
     ft, fb = font("raleway", b.get("time_size", 30), 700), font("raleway", b.get("text_size", 33), 700)
     acc = tuple(b.get("accent", BLUE))
     y = hh + 34
@@ -1073,7 +1074,8 @@ def badge_card(b, bw, bh):
         ImageDraw.Draw(im).line([(34, y - 12), (bw - 34, y - 12)], fill=(222, 222, 225, 255), width=2)
     if b.get("footer"):
         f = draw_line(b["footer"], font("raleway", 24, 600), (120, 124, 130, 255))
-        im.alpha_composite(f, ((bw - f.width) // 2, bh - f.height - 26))
+        if y + f.height + 20 < bh - 20:  # only when it doesn't crowd the last session
+            im.alpha_composite(f, ((bw - f.width) // 2, bh - f.height - 26))
     return im
 
 
@@ -1083,9 +1085,9 @@ def render_badges(spec, out, tmp):
     dur = spec.get("duration", 9)
     bg = spec["badges"]
     item = {**spec["items"][0], "audio": False}
-    ww = bg.get("window_width", W - 180)
+    ww = bg.get("window_width", 620)
     wh = round(ww * 9 / 16) // 2 * 2
-    wx, wy = (W - ww) // 2, bg.get("window_top", 440)
+    wx, wy = (W - ww) // 2, bg.get("window_top", SAFE_TOP + 170)
     col = tuple(bg.get("color", BLUE))
     col_dark = tuple(bg.get("color_dark", (30, 128, 196, 255)))
     a1, c1, _ = source(item, 0, tmp, W, H, dur)
@@ -1096,7 +1098,9 @@ def render_badges(spec, out, tmp):
     side = bg.get("side", 90)  # margin to the screen edges
     bw = (W - 2 * side - 40 * (n - 1)) // n
     bh = bg.get("badge_height", 760)
-    top_y = wy + wh + bg.get("drop", 170)
+    top_y = wy + wh + bg.get("drop", 110)
+    cta_h = 190 if bg.get("cta") else 0
+    bh = min(bh, SAFE_BOTTOM - cta_h - top_y)  # badges shrink rather than run into "Say something"
     imgs = [badge_card(c, bw, bh) for c in cards]
     title = draw_line(bg["title"], font("raleway", 70, 800), col)
     fsub = font("raleway", 36, 600)
@@ -1139,8 +1143,8 @@ def render_badges(spec, out, tmp):
             rise = top_y - (wy + wh - bh - 40)
             drop = -(1 - (1 - (1 - p) ** 3)) * rise if p < 1 else 0
             hit = t - st - 0.65
-            side = 1 if i % 2 == 0 else -1
-            ang = 3.5 * side * np.exp(-hit * 2.6) * np.sin(hit * 7) if hit > 0 else 0
+            sway = 1 if i % 2 == 0 else -1
+            ang = 3.5 * sway * np.exp(-hit * 2.6) * np.sin(hit * 7) if hit > 0 else 0
             clip_y = round(top_y + drop)
             # lanyards start behind the clip window, so they never cross the titles
             if clip_y - 30 > wy + 60:
@@ -1288,7 +1292,7 @@ def render_tearoff(spec, out, tmp):
         (tc.get("bottom", "del GovTech Summit"), 40, (25, 25, 28, 255), 600),
     ], 5)
     under = paper_sheet(ph, 9).crop((0, 0, pw, ph))
-    cx, top = W // 2, tc.get("top_y", 560)
+    cx, top = W // 2, tc.get("top_y", SAFE_TOP + 40)
     caption = text_layer({"lines": [tc["caption"]], "size": 50, "pos": top + ph + 250}) if tc.get("caption") else None
     logo = None
     if tc.get("logo"):
@@ -1345,7 +1349,7 @@ def render_tearoff(spec, out, tmp):
         if logo and la > 0:
             l2 = logo.copy()
             l2.putalpha(l2.getchannel("A").point(lambda v: int(v * la)))
-            paste(fr, l2, (W - logo.width) // 2, H - 330 - logo.height)
+            paste(fr, l2, (W - logo.width) // 2, SAFE_BOTTOM - logo.height)
         fr.save(frames_dir / f"f{n:03d}.png")
     inputs = a1 + ["-framerate", str(FPS), "-i", str(frames_dir / "f%03d.png")]
     parts = [
