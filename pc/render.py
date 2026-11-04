@@ -1545,6 +1545,89 @@ def render_bubble(spec, out, tmp):
     run([FFMPEG, "-y", "-v", "error", *inputs, "-filter_complex", ";".join(parts), "-map", "[v]", "-map", "[a]", "-t", str(dur), *ENCODE, str(out)])
 
 
+def notif_card(app, when, title, body, cw):
+    """A phone notification: translucent white card, app icon, app name, time, title and body."""
+    ft, fb = font("raleway", 38, 800), font("raleway", 33, 600)
+    bl = wrap(body, fb, cw - 150)
+    bh = 60 + 46 + sum(fb.getbbox("Ág")[3] + 6 for _ in bl) + 40
+    s = 2
+    im = Image.new("RGBA", (cw * s, bh * s), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    d.rounded_rectangle([0, 0, cw * s - 1, bh * s - 1], radius=40 * s, fill=(245, 246, 248, 236))
+    # app icon: blue rounded square with a white G-like mark
+    d.rounded_rectangle([28 * s, 28 * s, 92 * s, 92 * s], radius=16 * s, fill=BLUE)
+    d.arc([40 * s, 40 * s, 80 * s, 80 * s], 40, 330, fill=(255, 255, 255, 255), width=7 * s)
+    d.line([(60 * s, 60 * s), (80 * s, 60 * s)], fill=(255, 255, 255, 255), width=7 * s)
+    im = im.resize((cw, bh), Image.LANCZOS)
+    an = draw_line(app.upper(), font("inter", 24, 700), (110, 114, 120, 255))
+    im.alpha_composite(an, (112, 30))
+    wt = draw_line(when, font("inter", 24, 600), (130, 134, 140, 255))
+    im.alpha_composite(wt, (cw - 36 - wt.width, 30))
+    ti = draw_line(title, ft, (20, 20, 24, 255))
+    im.alpha_composite(ti, (112, 64))
+    y = 64 + ti.height + 2
+    for ln in bl:
+        li = draw_line(ln, fb, (60, 62, 68, 255))
+        im.alpha_composite(li, (112, y))
+        y += li.height
+    return im
+
+
+def render_lockscreen(spec, out, tmp):
+    """The clip as a locked phone's wallpaper: big clock and date, then reminder notifications
+    that drop in one by one and stack."""
+    dur = spec.get("duration", 10)
+    ls = spec["lockscreen"]
+    item = {**spec["items"][0], "audio": False}
+    args, chain, _ = source(item, 0, tmp, W, H, dur)
+    chain += ",gblur=sigma=6,eq=brightness=-0.22:saturation=0.9"
+    clock = draw_line(ls.get("time", "12:00"), font("inter", 190, 700), WHITE, 1.05)
+    date = draw_line(ls.get("date", ""), font("raleway", 40, 600), (235, 238, 242, 255))
+    cw = W - 2 * 90
+    cards = [notif_card(ls.get("app", "GovTech Summit"), n.get("when", "ahora"), n["title"], n["body"], cw) for n in ls["notifications"]]
+    top = SAFE_TOP + 10
+    static = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    sh = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    sh.alpha_composite(clock, ((W - clock.width) // 2, top))
+    sh.alpha_composite(date, ((W - date.width) // 2, top + clock.height + 6))
+    shadow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    shadow.putalpha(sh.getchannel("A").point(lambda a: a * 0.5))
+    static.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(14)))
+    static.alpha_composite(sh)
+    y0 = top + clock.height + date.height + 70
+    gap = 26
+    frames_dir = Path(tmp) / "lock"
+    frames_dir.mkdir()
+    starts = [0.7 + 1.1 * i for i in range(len(cards))]
+    nfr = round((starts[-1] + 0.8) * FPS)
+    for n in range(nfr + 1):
+        t = n / FPS
+        fr = static.copy()
+        y = y0
+        for card, st in zip(cards, starts):
+            p = min(1, max(0, (t - st) / 0.45))
+            if p > 0:
+                e = ease_out_back(p, 1.2)
+                c2 = card.copy()
+                c2.putalpha(c2.getchannel("A").point(lambda v: int(v * min(1, p * 1.6))))
+                sdw = Image.new("RGBA", card.size, (0, 0, 0, 0))
+                sdw.putalpha(c2.getchannel("A").point(lambda v: int(v * 0.35)))
+                yy = round(y - (1 - e) * 120)
+                paste(fr, sdw.filter(ImageFilter.GaussianBlur(16)), 90 + 4, yy + 12)
+                paste(fr, c2, 90, yy)
+            y += card.height + gap
+        fr.save(frames_dir / f"f{n:03d}.png")
+    assert y - gap <= SAFE_BOTTOM, "notifications run past the visible area"
+    inputs = args + ["-framerate", str(FPS), "-i", str(frames_dir / "f%03d.png")]
+    parts = [
+        f"[0:v]{chain}[b]",
+        "[1:v]format=rgba[o]",
+        "[b][o]overlay=eof_action=repeat,format=yuv420p[v]",
+        f"anullsrc=r=48000:cl=stereo,atrim=duration={dur}[a]",
+    ]
+    run([FFMPEG, "-y", "-v", "error", *inputs, "-filter_complex", ";".join(parts), "-map", "[v]", "-map", "[a]", "-t", str(dur), *ENCODE, str(out)])
+
+
 def paper_sheet(size, seed):
     rng = np.random.default_rng(seed)
     noise = rng.normal(0, 3.2, (size, size)).astype(np.float32)
@@ -1719,7 +1802,7 @@ def previews(out):
 
 def render(spec, out):
     with tempfile.TemporaryDirectory() as tmp:
-        {"cuts": render_cuts, "stack": render_stack, "grid": render_grid, "split": render_split, "agenda": render_agenda, "postcard": render_postcard, "board": render_board, "plan": render_plan, "badges": render_badges, "opener": render_opener, "tearoff": render_tearoff, "ticket": render_ticket, "bubble": render_bubble, "note": render_note}[spec["layout"]](spec, out, tmp)
+        {"cuts": render_cuts, "stack": render_stack, "grid": render_grid, "split": render_split, "agenda": render_agenda, "postcard": render_postcard, "board": render_board, "plan": render_plan, "badges": render_badges, "opener": render_opener, "tearoff": render_tearoff, "ticket": render_ticket, "bubble": render_bubble, "lockscreen": render_lockscreen, "note": render_note}[spec["layout"]](spec, out, tmp)
     return previews(out)
 
 
