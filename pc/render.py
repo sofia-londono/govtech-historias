@@ -1445,7 +1445,7 @@ def render_note(spec, out, tmp):
             if a > 0:
                 lg = logo.copy()
                 lg.putalpha(lg.getchannel("A").point(lambda v: int(v * a)))
-                paste(frame, lg, (W - lg.width) // 2, (H - 330 - lg.height) if note.get("caption") else (BOTTOM - lg.height - 10))
+                paste(frame, lg, (W - lg.width) // 2, note["logo_y"] if "logo_y" in note else ((H - 330 - lg.height) if note.get("caption") else (BOTTOM - lg.height - 10)))
         if caption:
             a = min(1, max(0, (t - 2.0) / 0.5))
             if a > 0:
