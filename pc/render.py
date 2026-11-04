@@ -1006,6 +1006,111 @@ def render_plan(spec, out, tmp):
     run([FFMPEG, "-y", "-v", "error", *inputs, "-filter_complex", ";".join(parts), "-map", "[v]", "-map", "[a]", "-t", str(dur), *ENCODE, str(out)])
 
 
+def badge_card(b, bw, bh):
+    """One event badge: blue header with the room, its sessions, and a slot for the lanyard clip."""
+    s = 2
+    im = Image.new("RGBA", (bw * s, bh * s), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    d.rounded_rectangle([0, 0, bw * s - 1, bh * s - 1], radius=28 * s, fill=(250, 250, 248, 255))
+    hh = 190
+    d.rounded_rectangle([0, 0, bw * s - 1, hh * s], radius=28 * s, fill=BLUE)
+    d.rectangle([0, (hh - 30) * s, bw * s - 1, hh * s], fill=BLUE)
+    d.rounded_rectangle([(bw / 2 - 50) * s, 22 * s, (bw / 2 + 50) * s, 40 * s], radius=9 * s, fill=(20, 20, 22, 255))
+    im = im.resize((bw, bh), Image.LANCZOS)
+    kick = draw_line(b.get("kicker", "POLICY LABS"), font("inter", 24, 700), (4, 32, 47, 255))
+    im.alpha_composite(kick, ((bw - kick.width) // 2, 64))
+    name = draw_line(b["name"], font("inter", 56, 800), WHITE, 1.15)
+    im.alpha_composite(name, ((bw - name.width) // 2, 98))
+    ft, fb = font("raleway", 30, 700), font("raleway", 33, 700)
+    y = hh + 34
+    ink = (25, 25, 28, 255)
+    for when, what in b["sessions"]:
+        t = draw_line(when, ft, BLUE)
+        im.alpha_composite(t, (34, y))
+        y += t.height + 2
+        for ln in wrap(what, fb, bw - 68):
+            li = draw_line(ln, fb, ink)
+            im.alpha_composite(li, (34, y))
+            y += li.height
+        y += 22
+        ImageDraw.Draw(im).line([(34, y - 12), (bw - 34, y - 12)], fill=(222, 222, 225, 255), width=2)
+    if b.get("footer"):
+        f = draw_line(b["footer"], font("raleway", 24, 600), (120, 124, 130, 255))
+        im.alpha_composite(f, ((bw - f.width) // 2, bh - f.height - 26))
+    return im
+
+
+def render_badges(spec, out, tmp):
+    """Room-by-room schedule as event badges hanging from lanyards; they drop in and swing to rest.
+    The clip plays in a window on top."""
+    dur = spec.get("duration", 9)
+    bg = spec["badges"]
+    item = {**spec["items"][0], "audio": False}
+    ww = W - 120
+    wh = round(ww * 9 / 16) // 2 * 2
+    wx, wy = 60, bg.get("window_top", 420)
+    a1, c1, _ = source(item, 0, tmp, W, H, dur)
+    a2, c2, _ = source(item, 1, tmp, ww, wh, dur)
+    c1 += ",hue=s=0,boxblur=24:2,eq=brightness=-0.42"
+    cards = bg["cards"]
+    n = len(cards)
+    bw = (W - 80 - 40 * (n - 1)) // n
+    bh = bg.get("badge_height", 760)
+    top_y = wy + wh + bg.get("drop", 170)
+    imgs = [badge_card(c, bw, bh) for c in cards]
+    title = draw_line(bg["title"], font("raleway", 64, 700), WHITE)
+    sub = draw_line(bg.get("subtitle", ""), font("raleway", 36, 600), BLUE) if bg.get("subtitle") else None
+    static = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ty = wy - 40 - title.height - (sub.height + 6 if sub else 0)
+    static.alpha_composite(title, ((W - title.width) // 2, ty))
+    if sub:
+        static.alpha_composite(sub, ((W - sub.width) // 2, ty + title.height + 6))
+    if bg.get("footer"):
+        fo = draw_line(bg["footer"], font("raleway", 40, 700), BLUE)
+        static.alpha_composite(fo, ((W - fo.width) // 2, top_y + bh + 40))
+    frames_dir = Path(tmp) / "badges"
+    frames_dir.mkdir()
+    nfr = round(2.8 * FPS)
+    for f in range(nfr + 1):
+        t = f / FPS
+        fr = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        for i, im in enumerate(imgs):
+            cx = 40 + i * (bw + 40) + bw // 2
+            st = 0.15 + 0.35 * i
+            p = min(1, max(0, (t - st) / 0.6))
+            drop = (1 - ease_out_back(p, 1.1)) * -(bh + 500) if p < 1 else 0
+            hit = t - st - 0.6
+            ang = (5 if i % 2 == 0 else -5) * np.exp(-hit * 2.6) * np.cos(hit * 7) if hit > 0 else (6 if i % 2 == 0 else -6) * (1 - p)
+            # lanyard: two blue straps from the top edge to the clip
+            strap = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+            sd = ImageDraw.Draw(strap)
+            clip_y = round(top_y + drop)
+            sx = cx + np.sin(np.radians(ang)) * 0
+            for off in (-34, 34):
+                sd.line([(cx + off * 2.2, 0), (sx + off * 0.5, clip_y - 30)], fill=(30, 128, 196, 255), width=26)
+                sd.line([(cx + off * 2.2 - 6, 0), (sx + off * 0.5 - 6, clip_y - 30)], fill=BLUE, width=10)
+            sd.rounded_rectangle([sx - 22, clip_y - 46, sx + 22, clip_y + 30], radius=8, fill=(185, 188, 192, 255))
+            sd.rounded_rectangle([sx - 10, clip_y - 38, sx + 10, clip_y + 22], radius=5, fill=(120, 124, 128, 255))
+            fr.alpha_composite(strap)
+            rot = im.rotate(ang, Image.BICUBIC, expand=True, center=(bw // 2, 0))
+            sh = Image.new("RGBA", rot.size, (0, 0, 0, 0))
+            sh.putalpha(rot.getchannel("A").point(lambda a: a * 0.55))
+            paste(fr, sh.filter(ImageFilter.GaussianBlur(14)), round(cx - rot.width / 2 + 8), clip_y + 16)
+            paste(fr, rot, round(cx - rot.width / 2), clip_y)
+        fr.alpha_composite(static)
+        fr.save(frames_dir / f"f{f:03d}.png")
+    inputs = a1 + a2 + ["-framerate", str(FPS), "-i", str(frames_dir / "f%03d.png")]
+    parts = [
+        f"[0:v]{c1}[bg]",
+        "[2:v]format=rgba[bd]",
+        "[bg][bd]overlay=eof_action=repeat[s0]",
+        f"[1:v]{c2}[win]",
+        f"[s0][win]overlay={wx}:{wy},format=yuv420p[v]",
+        f"anullsrc=r=48000:cl=stereo,atrim=duration={dur}[a]",
+    ]
+    run([FFMPEG, "-y", "-v", "error", *inputs, "-filter_complex", ";".join(parts), "-map", "[v]", "-map", "[a]", "-t", str(dur), *ENCODE, str(out)])
+
+
 def paper_sheet(size, seed):
     rng = np.random.default_rng(seed)
     noise = rng.normal(0, 3.2, (size, size)).astype(np.float32)
@@ -1167,7 +1272,7 @@ def previews(out):
 
 def render(spec, out):
     with tempfile.TemporaryDirectory() as tmp:
-        {"cuts": render_cuts, "stack": render_stack, "grid": render_grid, "split": render_split, "agenda": render_agenda, "postcard": render_postcard, "board": render_board, "plan": render_plan, "note": render_note}[spec["layout"]](spec, out, tmp)
+        {"cuts": render_cuts, "stack": render_stack, "grid": render_grid, "split": render_split, "agenda": render_agenda, "postcard": render_postcard, "board": render_board, "plan": render_plan, "badges": render_badges, "note": render_note}[spec["layout"]](spec, out, tmp)
     return previews(out)
 
 
