@@ -450,16 +450,31 @@ def notepad_design(design, cells, rh, labels):
             page.alpha_composite(bt, (m + 60, y))
             y += bt.height + 26
         ft, fb = font("raleway", 38, 700), font("raleway", 33, 600)
+        tl_x = m + 60 + (40 if design.get("timeline") else 0)
+        col = max(round(ft.getlength(r[0])) for r in design["body"]) + 30
+        first = y
+        dots = []
         for when, what in design["body"]:
             tl = draw_line(when, ft, BLUE)
-            page.alpha_composite(tl, (m + 60, y))
-            lines = wrap(what, fb, pw - 120 - 190)
+            page.alpha_composite(tl, (tl_x, y))
+            dots.append(y + tl.height // 2)
+            lines = what if isinstance(what, list) else wrap(what, fb, pw - 120 - col - (tl_x - m - 60))
             yy = y + 4
             for ln in lines:
                 li = draw_line(ln, fb, (235, 235, 235, 255))
-                page.alpha_composite(li, (m + 60 + 190, yy))
+                page.alpha_composite(li, (tl_x + col, yy))
                 yy += li.height
-            y = max(y + tl.height, yy) + 26
+            y = max(y + tl.height, yy) + (46 if design.get("timeline") else 26)
+        if design.get("body_footer"):
+            bf = draw_line(design["body_footer"], font("raleway", 40, 700), BLUE)
+            page.alpha_composite(bf, ((W - bf.width) // 2, y + 10))
+        if design.get("timeline"):
+            # a vertical timeline with one dot per block
+            td = ImageDraw.Draw(page)
+            lx = m + 70
+            td.line([(lx, dots[0]), (lx, dots[-1])], fill=(59, 169, 240, 140), width=4)
+            for dy in dots:
+                td.ellipse([lx - 13, dy - 13, lx + 13, dy + 13], fill=BLUE, outline=(22, 22, 24, 255), width=4)
     # photo windows with a thin blue frame
     r = design.get("radius", 22)
     bw = design.get("border", 4)
