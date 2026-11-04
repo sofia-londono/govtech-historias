@@ -1371,7 +1371,7 @@ def ticket_card(tk, tw):
     rng = np.random.default_rng(4)
     x = 55
     stub_w = round(font("raleway", 30, 700).getlength(tk.get("stub", "GovTech Summit 2026")))
-    while x < tw - 55 - stub_w - 50:
+    while x < tw - 55 - stub_w - 110:
         wbar = int(rng.choice([3, 3, 5, 8]))
         bd.rectangle([x, sy, x + wbar, sy + 80], fill=(30, 30, 34, 255))
         x += wbar + int(rng.choice([3, 4, 6]))
