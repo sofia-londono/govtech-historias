@@ -1059,12 +1059,15 @@ def render_badges(spec, out, tmp):
     top_y = wy + wh + bg.get("drop", 170)
     imgs = [badge_card(c, bw, bh) for c in cards]
     title = draw_line(bg["title"], font("raleway", 70, 800), BLUE)
-    sub = draw_line(bg.get("subtitle", ""), font("raleway", 38, 600), WHITE) if bg.get("subtitle") else None
+    fsub = font("raleway", 36, 600)
+    subs = [draw_line(ln, fsub, WHITE) for ln in wrap(bg.get("subtitle", ""), fsub, W - 160)] if bg.get("subtitle") else []
     static = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    ty = wy - 46 - title.height - (sub.height + 8 if sub else 0)
+    ty = wy - 46 - title.height - sum(sl.height + 4 for sl in subs) - (8 if subs else 0)
     static.alpha_composite(title, ((W - title.width) // 2, ty))
-    if sub:
-        static.alpha_composite(sub, ((W - sub.width) // 2, ty + title.height + 8))
+    yy = ty + title.height + 8
+    for sl in subs:
+        static.alpha_composite(sl, ((W - sl.width) // 2, yy))
+        yy += sl.height + 4
     # frame around the clip window: rounded blue border with a soft shadow
     fr_ = Image.new("RGBA", (W * 2, H * 2), (0, 0, 0, 0))
     ImageDraw.Draw(fr_).rounded_rectangle([(wx - 8) * 2, (wy - 8) * 2, (wx + ww + 8) * 2, (wy + wh + 8) * 2], radius=34 * 2, outline=BLUE, width=7 * 2)
@@ -1091,26 +1094,34 @@ def render_badges(spec, out, tmp):
         for i, im in enumerate(imgs):
             cx = 40 + i * (bw + 40) + bw // 2
             st = 0.15 + 0.35 * i
-            p = min(1, max(0, (t - st) / 0.8))
-            # the badge slides out from behind the clip window and settles in place
-            rise = top_y - (wy + 60)
-            drop = (1 - ease_out_back(p, 0.9)) * -rise if p < 1 else 0
-            hit = t - st - 0.7
+            p = min(1, max(0, (t - st) / 0.65))
+            # the badge slides straight down out of the clip window's bottom edge, then swings a little
+            rise = top_y - (wy + wh - bh - 40)
+            drop = -(1 - (1 - (1 - p) ** 3)) * rise if p < 1 else 0
+            hit = t - st - 0.65
             side = 1 if i % 2 == 0 else -1
-            ang = 5 * side * np.exp(-hit * 2.4) * np.cos(hit * 7) if hit > 0 else 6 * side * (1 - p)
+            ang = 3.5 * side * np.exp(-hit * 2.6) * np.sin(hit * 7) if hit > 0 else 0
             clip_y = round(top_y + drop)
             # lanyards start behind the clip window, so they never cross the titles
-            for off in (-34, 34):
-                bd.line([(cx + off * 1.6, wy + 40), (cx + off * 0.5, clip_y - 30)], fill=(30, 128, 196, 255), width=26)
-                bd.line([(cx + off * 1.6 - 6, wy + 40), (cx + off * 0.5 - 6, clip_y - 30)], fill=BLUE, width=10)
-            fd = ImageDraw.Draw(back)
-            fd.rounded_rectangle([cx - 22, clip_y - 46, cx + 22, clip_y + 30], radius=8, fill=(185, 188, 192, 255))
-            fd.rounded_rectangle([cx - 10, clip_y - 38, cx + 10, clip_y + 22], radius=5, fill=(120, 124, 128, 255))
+            if clip_y - 30 > wy + 60:
+                for off in (-34, 34):
+                    bd.line([(cx + off * 1.6, wy + 40), (cx + off * 0.5, clip_y - 30)], fill=(30, 128, 196, 255), width=26)
+                    bd.line([(cx + off * 1.6 - 6, wy + 40), (cx + off * 0.5 - 6, clip_y - 30)], fill=BLUE, width=10)
             rot = im.rotate(ang, Image.BICUBIC, expand=True, center=(bw // 2, 0))
             sh = Image.new("RGBA", rot.size, (0, 0, 0, 0))
             sh.putalpha(rot.getchannel("A").point(lambda a: a * 0.55))
-            paste(back, sh.filter(ImageFilter.GaussianBlur(14)), round(cx - rot.width / 2 + 8), clip_y + 16)
-            paste(back, rot, round(cx - rot.width / 2), clip_y)
+            card = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+            fd = ImageDraw.Draw(card)
+            fd.rounded_rectangle([cx - 22, clip_y - 46, cx + 22, clip_y + 30], radius=8, fill=(185, 188, 192, 255))
+            fd.rounded_rectangle([cx - 10, clip_y - 38, cx + 10, clip_y + 22], radius=5, fill=(120, 124, 128, 255))
+            paste(card, sh.filter(ImageFilter.GaussianBlur(14)), round(cx - rot.width / 2 + 8), clip_y + 16)
+            paste(card, rot, round(cx - rot.width / 2), clip_y)
+            # nothing of the badge shows above the window's bottom edge: it comes out of the image
+            a = np.asarray(card.getchannel("A")).astype(np.float32) * min(1.0, p * 2.2)
+            a[: wy + wh] = 0
+            a = a.astype(np.uint8)
+            card.putalpha(Image.fromarray(a))
+            back.alpha_composite(card)
         merged = static.copy()
         merged.alpha_composite(front)
         back.save(back_dir / f"f{f:03d}.png")
