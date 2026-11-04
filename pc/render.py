@@ -1058,8 +1058,8 @@ def render_badges(spec, out, tmp):
     bh = bg.get("badge_height", 760)
     top_y = wy + wh + bg.get("drop", 170)
     imgs = [badge_card(c, bw, bh) for c in cards]
-    title = draw_line(bg["title"], font("raleway", 64, 700), WHITE)
-    sub = draw_line(bg.get("subtitle", ""), font("raleway", 36, 600), WHITE) if bg.get("subtitle") else None
+    title = draw_line(bg["title"], font("raleway", 70, 800), BLUE)
+    sub = draw_line(bg.get("subtitle", ""), font("raleway", 38, 600), WHITE) if bg.get("subtitle") else None
     static = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     ty = wy - 46 - title.height - (sub.height + 8 if sub else 0)
     static.alpha_composite(title, ((W - title.width) // 2, ty))
@@ -1091,8 +1091,10 @@ def render_badges(spec, out, tmp):
         for i, im in enumerate(imgs):
             cx = 40 + i * (bw + 40) + bw // 2
             st = 0.15 + 0.35 * i
-            p = min(1, max(0, (t - st) / 0.7))
-            drop = (1 - ease_out_back(p, 1.1)) * -(bh + 500) if p < 1 else 0
+            p = min(1, max(0, (t - st) / 0.8))
+            # the badge slides out from behind the clip window and settles in place
+            rise = top_y - (wy + 60)
+            drop = (1 - ease_out_back(p, 0.9)) * -rise if p < 1 else 0
             hit = t - st - 0.7
             side = 1 if i % 2 == 0 else -1
             ang = 5 * side * np.exp(-hit * 2.4) * np.cos(hit * 7) if hit > 0 else 6 * side * (1 - p)
@@ -1101,14 +1103,14 @@ def render_badges(spec, out, tmp):
             for off in (-34, 34):
                 bd.line([(cx + off * 1.6, wy + 40), (cx + off * 0.5, clip_y - 30)], fill=(30, 128, 196, 255), width=26)
                 bd.line([(cx + off * 1.6 - 6, wy + 40), (cx + off * 0.5 - 6, clip_y - 30)], fill=BLUE, width=10)
-            fd = ImageDraw.Draw(front)
+            fd = ImageDraw.Draw(back)
             fd.rounded_rectangle([cx - 22, clip_y - 46, cx + 22, clip_y + 30], radius=8, fill=(185, 188, 192, 255))
             fd.rounded_rectangle([cx - 10, clip_y - 38, cx + 10, clip_y + 22], radius=5, fill=(120, 124, 128, 255))
             rot = im.rotate(ang, Image.BICUBIC, expand=True, center=(bw // 2, 0))
             sh = Image.new("RGBA", rot.size, (0, 0, 0, 0))
             sh.putalpha(rot.getchannel("A").point(lambda a: a * 0.55))
-            paste(front, sh.filter(ImageFilter.GaussianBlur(14)), round(cx - rot.width / 2 + 8), clip_y + 16)
-            paste(front, rot, round(cx - rot.width / 2), clip_y)
+            paste(back, sh.filter(ImageFilter.GaussianBlur(14)), round(cx - rot.width / 2 + 8), clip_y + 16)
+            paste(back, rot, round(cx - rot.width / 2), clip_y)
         merged = static.copy()
         merged.alpha_composite(front)
         back.save(back_dir / f"f{f:03d}.png")
