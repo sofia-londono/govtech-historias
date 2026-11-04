@@ -1514,6 +1514,14 @@ def render_bubble(spec, out, tmp):
             hp = pill(bb["hint"], font("raleway", hs, 700), WHITE, (14, 14, 18, 215), (24, 10))
             hp.putalpha(hp.getchannel("A").point(lambda v: int(v * ha)))
             fr.alpha_composite(hp, ((W - hp.width) // 2, by + bh_ + 40 + 60))
+        if bb.get("cta") and t >= 2.9:
+            # the call to action: a big blue pill that gently pulses
+            ca = min(1, (t - 2.9) / 0.4)
+            pulse = 1 + 0.03 * np.sin((t - 2.9) * 5)
+            cp = pill(bb["cta"], font("raleway", 50, 800), (4, 32, 47, 255), BLUE, (40, 18))
+            cp = cp.resize((round(cp.width * pulse), round(cp.height * pulse)), Image.LANCZOS)
+            cp.putalpha(cp.getchannel("A").point(lambda v: int(v * ca)))
+            fr.alpha_composite(cp, ((W - cp.width) // 2, by + bh_ + 40 + 160 - (cp.height - 96) // 2))
         fr.save(frames_dir / f"f{n:03d}.png")
     inputs = args + ["-framerate", str(FPS), "-i", str(frames_dir / "f%03d.png")]
     parts = [
