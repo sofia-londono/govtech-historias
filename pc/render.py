@@ -1013,26 +1013,29 @@ def badge_card(b, bw, bh):
     d = ImageDraw.Draw(im)
     d.rounded_rectangle([0, 0, bw * s - 1, bh * s - 1], radius=28 * s, fill=(250, 250, 248, 255))
     hh = 190
-    d.rounded_rectangle([0, 0, bw * s - 1, hh * s], radius=28 * s, fill=BLUE)
-    d.rectangle([0, (hh - 30) * s, bw * s - 1, hh * s], fill=BLUE)
+    col = tuple(b.get("color", BLUE))
+    d.rounded_rectangle([0, 0, bw * s - 1, hh * s], radius=28 * s, fill=col)
+    d.rectangle([0, (hh - 30) * s, bw * s - 1, hh * s], fill=col)
     d.rounded_rectangle([(bw / 2 - 50) * s, 22 * s, (bw / 2 + 50) * s, 40 * s], radius=9 * s, fill=(20, 20, 22, 255))
     im = im.resize((bw, bh), Image.LANCZOS)
-    kick = draw_line(b.get("kicker", "POLICY LABS"), font("inter", 24, 700), (4, 32, 47, 255))
+    on = tuple(b.get("on_color", (4, 32, 47, 255)))
+    kick = draw_line(b.get("kicker", "POLICY LABS"), font("inter", 24, 700), on)
     im.alpha_composite(kick, ((bw - kick.width) // 2, 64))
-    name = draw_line(b["name"], font("inter", 56, 800), WHITE, 1.15)
+    name = draw_line(b["name"], font("inter", 56, 800), tuple(b.get("name_color", WHITE)), 1.15)
     im.alpha_composite(name, ((bw - name.width) // 2, 98))
-    ft, fb = font("raleway", 30, 700), font("raleway", 33, 700)
+    ft, fb = font("raleway", b.get("time_size", 30), 700), font("raleway", b.get("text_size", 33), 700)
+    acc = tuple(b.get("accent", BLUE))
     y = hh + 34
     ink = (25, 25, 28, 255)
     for when, what in b["sessions"]:
-        t = draw_line(when, ft, BLUE)
+        t = draw_line(when, ft, acc)
         im.alpha_composite(t, (34, y))
         y += t.height + 2
         for ln in wrap(what, fb, bw - 68):
             li = draw_line(ln, fb, ink)
             im.alpha_composite(li, (34, y))
             y += li.height
-        y += 22
+        y += b.get("row_gap", 22)
         ImageDraw.Draw(im).line([(34, y - 12), (bw - 34, y - 12)], fill=(222, 222, 225, 255), width=2)
     if b.get("footer"):
         f = draw_line(b["footer"], font("raleway", 24, 600), (120, 124, 130, 255))
@@ -1046,9 +1049,11 @@ def render_badges(spec, out, tmp):
     dur = spec.get("duration", 9)
     bg = spec["badges"]
     item = {**spec["items"][0], "audio": False}
-    ww = W - 140
+    ww = bg.get("window_width", W - 140)
     wh = round(ww * 9 / 16) // 2 * 2
-    wx, wy = 70, bg.get("window_top", 440)
+    wx, wy = (W - ww) // 2, bg.get("window_top", 440)
+    col = tuple(bg.get("color", BLUE))
+    col_dark = tuple(bg.get("color_dark", (30, 128, 196, 255)))
     a1, c1, _ = source(item, 0, tmp, W, H, dur)
     a2, c2, _ = source(item, 1, tmp, ww, wh, dur)
     c1 += ",hue=s=0,boxblur=24:2,eq=brightness=-0.42"
@@ -1058,7 +1063,7 @@ def render_badges(spec, out, tmp):
     bh = bg.get("badge_height", 760)
     top_y = wy + wh + bg.get("drop", 170)
     imgs = [badge_card(c, bw, bh) for c in cards]
-    title = draw_line(bg["title"], font("raleway", 70, 800), BLUE)
+    title = draw_line(bg["title"], font("raleway", 70, 800), col)
     fsub = font("raleway", 36, 600)
     subs = [draw_line(ln, fsub, WHITE) for ln in wrap(bg.get("subtitle", ""), fsub, W - 160)] if bg.get("subtitle") else []
     static = Image.new("RGBA", (W, H), (0, 0, 0, 0))
@@ -1070,12 +1075,12 @@ def render_badges(spec, out, tmp):
         yy += sl.height + 4
     # frame around the clip window: rounded blue border with a soft shadow
     fr_ = Image.new("RGBA", (W * 2, H * 2), (0, 0, 0, 0))
-    ImageDraw.Draw(fr_).rounded_rectangle([(wx - 8) * 2, (wy - 8) * 2, (wx + ww + 8) * 2, (wy + wh + 8) * 2], radius=34 * 2, outline=BLUE, width=7 * 2)
+    ImageDraw.Draw(fr_).rounded_rectangle([(wx - 8) * 2, (wy - 8) * 2, (wx + ww + 8) * 2, (wy + wh + 8) * 2], radius=34 * 2, outline=col, width=7 * 2)
     static.alpha_composite(fr_.resize((W, H), Image.LANCZOS))
     if bg.get("cta"):
         cy = top_y + bh + 50
         for k, ln in enumerate(bg["cta"]):
-            li = draw_line(ln, font("raleway", 46 if k == 0 else 34, 700 if k == 0 else 600), BLUE if k == 0 else WHITE)
+            li = draw_line(ln, font("raleway", 46 if k == 0 else 34, 700 if k == 0 else 600), col if k == 0 else WHITE)
             static.alpha_composite(li, ((W - li.width) // 2, cy))
             cy += li.height + 8
     mask = Image.new("L", (ww * 2, wh * 2), 0)
@@ -1105,8 +1110,8 @@ def render_badges(spec, out, tmp):
             # lanyards start behind the clip window, so they never cross the titles
             if clip_y - 30 > wy + 60:
                 for off in (-34, 34):
-                    bd.line([(cx + off * 1.6, wy + 40), (cx + off * 0.5, clip_y - 30)], fill=(30, 128, 196, 255), width=26)
-                    bd.line([(cx + off * 1.6 - 6, wy + 40), (cx + off * 0.5 - 6, clip_y - 30)], fill=BLUE, width=10)
+                    bd.line([(cx + off * 1.6, wy + 40), (cx + off * 0.5, clip_y - 30)], fill=col_dark, width=26)
+                    bd.line([(cx + off * 1.6 - 6, wy + 40), (cx + off * 0.5 - 6, clip_y - 30)], fill=col, width=10)
             rot = im.rotate(ang, Image.BICUBIC, expand=True, center=(bw // 2, 0))
             sh = Image.new("RGBA", rot.size, (0, 0, 0, 0))
             sh.putalpha(rot.getchannel("A").point(lambda a: a * 0.55))
