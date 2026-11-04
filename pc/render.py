@@ -367,7 +367,9 @@ def grid_design(design, cells, rh, labels):
     y = design["top"] - 70
     imgs = []
     for i, t in enumerate(title):
-        imgs.append(draw_line(t, font("raleway", 64 if i == 0 else 38, 700 if i == 0 else 600), WHITE if i == 0 else (190, 220, 240, 255)))
+        ftt = font("raleway", 64 if i == 0 else 38, 700 if i == 0 else 600)
+        for ln in wrap(t, ftt, W - 200):  # keep a margin to the screen edges
+            imgs.append(draw_line(ln, ftt, WHITE if i == 0 else (190, 220, 240, 255)))
     y -= sum(im.height for im in imgs)
     for i, im in enumerate(imgs):
         frame.alpha_composite(im, ((W - im.width) // 2, y))
