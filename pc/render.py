@@ -807,6 +807,94 @@ def render_postcard(spec, out, tmp):
     run([FFMPEG, "-y", "-v", "error", *inputs, "-filter_complex", ";".join(parts), "-map", "[v]", "-map", "[a]", "-t", str(dur), *ENCODE, str(out)])
 
 
+def render_board(spec, out, tmp):
+    """Airport departures board: the clip in a window on top, rows below that flip into place."""
+    dur = spec.get("duration", 9)
+    bd = spec["board"]
+    item = {**spec["items"][0], "audio": False}
+    x0, cw = 50, W - 100
+    wy = bd.get("window_top", 430)
+    ww = cw
+    wh = round(ww * 9 / 16) // 2 * 2
+    a1, c1, _ = source(item, 0, tmp, W, H, dur)
+    a2, c2, _ = source(item, 1, tmp, ww, wh, dur)
+    c1 += ",hue=s=0,boxblur=22:2,eq=brightness=-0.32"
+    fh, fr, fs = font("inter", 26, 700), font("inter", 36, 800), font("inter", 30, 700)
+    cols = bd.get("cols", [("HORA", 170), ("SALÓN", 120), ("MESA", 470), ("ESTADO", 190)])
+    rows = bd["rows"]
+    top_y = wy + wh + 40
+    title = draw_line(bd["title"], font("raleway", 64, 700), WHITE)
+    sub = draw_line(bd.get("subtitle", ""), font("raleway", 36, 600), BLUE) if bd.get("subtitle") else None
+    rh, gap = 74, 12
+    head_y = top_y
+    first_row = head_y + 56
+    end_y = first_row + len(rows) * (rh + gap)
+    rng = np.random.default_rng(7)
+    letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+    def base():
+        im = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        d = ImageDraw.Draw(im)
+        d.rounded_rectangle([x0 - 20, top_y - 30, x0 + cw + 20, end_y + 110], radius=28, fill=(14, 14, 16, 235))
+        ty = wy - 40 - (title.height + (sub.height + 6 if sub else 0))
+        im.alpha_composite(title, ((W - title.width) // 2, ty))
+        if sub:
+            im.alpha_composite(sub, ((W - sub.width) // 2, ty + title.height + 6))
+        x = x0
+        for name, w in cols:
+            hd = draw_line(name, fh, (150, 154, 160, 255))
+            im.alpha_composite(hd, (x + 10, head_y))
+            x += w
+        if bd.get("footer"):
+            ft = draw_line(bd["footer"], font("raleway", 40, 700), BLUE)
+            im.alpha_composite(ft, ((W - ft.width) // 2, end_y + 30))
+        return im
+
+    def cell(d, im, x, y, w, text, color, f):
+        d.rounded_rectangle([x, y, x + w - 10, y + rh], radius=8, fill=(34, 35, 38, 255))
+        d.line([(x, y + rh // 2), (x + w - 10, y + rh // 2)], fill=(10, 10, 12, 255), width=3)
+        t = draw_line(text, f, color)
+        if t.width > w - 30:
+            t = t.resize((w - 30, t.height), Image.LANCZOS)
+        im.alpha_composite(t, (x + 12, y + (rh - t.height) // 2))
+
+    frames_dir = Path(tmp) / "board"
+    frames_dir.mkdir()
+    anim = 2.6
+    nfr = round(anim * FPS)
+    static = base()
+    for n in range(nfr + 1):
+        t = n / FPS
+        im = static.copy()
+        d = ImageDraw.Draw(im)
+        for r, row in enumerate(rows):
+            y = first_row + r * (rh + gap)
+            x = x0
+            settle = 0.35 + r * 0.28
+            for c, ((_, w), val) in enumerate(zip(cols, row)):
+                done = t >= settle + c * 0.12
+                if t < 0.15 + r * 0.28:
+                    shown = ""
+                elif done:
+                    shown = val
+                else:
+                    shown = "".join(ch if ch == " " else letters[rng.integers(len(letters))] for ch in val)
+                color = BLUE if (c == 0 or c == len(cols) - 1) else WHITE
+                cell(d, im, x, y, w, shown, color, fr if c == 2 else fs)
+                x += w
+        im.save(frames_dir / f"f{n:03d}.png")
+    inputs = a1 + a2 + ["-framerate", str(FPS), "-i", str(frames_dir / "f%03d.png")]
+    parts = [
+        f"[0:v]{c1}[bg]",
+        f"[1:v]{c2}[win]",
+        f"[bg][win]overlay={x0}:{wy}[s0]",
+        f"[2:v]format=rgba[bo]",
+        "[s0][bo]overlay=eof_action=repeat,format=yuv420p[v]",
+        f"anullsrc=r=48000:cl=stereo,atrim=duration={dur}[a]",
+    ]
+    run([FFMPEG, "-y", "-v", "error", *inputs, "-filter_complex", ";".join(parts), "-map", "[v]", "-map", "[a]", "-t", str(dur), *ENCODE, str(out)])
+
+
 def paper_sheet(size, seed):
     rng = np.random.default_rng(seed)
     noise = rng.normal(0, 3.2, (size, size)).astype(np.float32)
@@ -968,7 +1056,7 @@ def previews(out):
 
 def render(spec, out):
     with tempfile.TemporaryDirectory() as tmp:
-        {"cuts": render_cuts, "stack": render_stack, "grid": render_grid, "split": render_split, "agenda": render_agenda, "postcard": render_postcard, "note": render_note}[spec["layout"]](spec, out, tmp)
+        {"cuts": render_cuts, "stack": render_stack, "grid": render_grid, "split": render_split, "agenda": render_agenda, "postcard": render_postcard, "board": render_board, "note": render_note}[spec["layout"]](spec, out, tmp)
     return previews(out)
 
 
