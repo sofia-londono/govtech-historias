@@ -184,6 +184,14 @@ def source(item, idx, tmp, w, h, dur):
     """Returns (ffmpeg input args, filter string turning the input into a w x h clip, has_audio)."""
     src = Path(item["src"])
     fx, fy = item.get("focus", [0.5, 0.5])
+    if src.suffix.lower() in IMAGE_EXT and item.get("still"):
+        # sharpest path for fast cuts: one high-quality downscale, no zoom resampling
+        chain = (
+            f"scale={w}:{h}:force_original_aspect_ratio=increase:flags=lanczos+accurate_rnd,"
+            f"crop={w}:{h}:(iw-{w})*{fx}:(ih-{h})*{fy},{LOOK},unsharp=5:5:0.7:5:5:0,"
+            f"scale=in_range=pc:out_range=tv,setsar=1,fps={FPS},format=yuv420p,trim=duration={dur},setpts=PTS-STARTPTS"
+        )
+        return ["-loop", "1", "-framerate", str(FPS), "-t", str(dur), "-i", str(prepare_image(src, tmp, idx))], chain, False
     if src.suffix.lower() in IMAGE_EXT:
         n = round(dur * FPS)
         chain = (
