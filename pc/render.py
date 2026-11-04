@@ -1446,6 +1446,82 @@ def render_ticket(spec, out, tmp):
     run([FFMPEG, "-y", "-v", "error", *inputs, "-filter_complex", ";".join(parts), "-map", "[v]", "-map", "[a]", "-t", str(dur), *ENCODE, str(out)])
 
 
+def render_bubble(spec, out, tmp):
+    """A chat bubble over the clip: typing dots first, then the question. Leaves room below
+    for Instagram's own question sticker, added when publishing."""
+    dur = spec.get("duration", 9)
+    bb = spec["bubble"]
+    item = {**spec["items"][0], "audio": False}
+    args, chain, _ = source(item, 0, tmp, W, H, dur)
+    chain += f",eq=brightness={bb.get('dim', -0.12)}"
+    fq = font("raleway", 58, 800)
+    lines = wrap(bb["question"], fq, W - 2 * 90 - 120)
+    qimgs = [draw_line(ln, fq, (22, 22, 26, 255)) for ln in lines]
+    bw_ = min(W - 180, max(q.width for q in qimgs) + 120)
+    bh_ = sum(q.height for q in qimgs) + 110
+    bx, by = (W - bw_) // 2, bb.get("y", SAFE_TOP + 260)
+    tag = pill(bb.get("tag", "Policy Labs"), font("raleway", 30, 700), (4, 32, 47, 255), BLUE, (20, 7))
+
+    def bubble(w_, h_):
+        im = Image.new("RGBA", (w_ * 2, (h_ + 40) * 2), (0, 0, 0, 0))
+        d = ImageDraw.Draw(im)
+        d.rounded_rectangle([0, 0, w_ * 2 - 1, h_ * 2], radius=44 * 2, fill=(250, 250, 248, 255))
+        # tail pointing down-left, like a message
+        d.polygon([(70 * 2, (h_ - 4) * 2), (150 * 2, (h_ - 4) * 2), (60 * 2, (h_ + 38) * 2)], fill=(250, 250, 248, 255))
+        return im.resize((w_, h_ + 40), Image.LANCZOS)
+
+    full = bubble(bw_, bh_)
+    y = 55
+    for q in qimgs:
+        full.alpha_composite(q, ((bw_ - q.width) // 2, y))
+        y += q.height
+    small = bubble(230, 120)
+    frames_dir = Path(tmp) / "bubble"
+    frames_dir.mkdir()
+    nfr = round(3.4 * FPS)
+    for n in range(nfr + 1):
+        t = n / FPS
+        fr = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        ta = min(1, max(0, (t - 0.1) / 0.4))
+        if ta > 0:
+            tg = tag.copy()
+            tg.putalpha(tg.getchannel("A").point(lambda v: int(v * ta)))
+            fr.alpha_composite(tg, ((W - tag.width) // 2, by - tag.height - 40))
+        if 0.4 <= t < 1.9:
+            # typing dots that pulse one after another
+            sm = small.copy()
+            sd = ImageDraw.Draw(sm)
+            for k in range(3):
+                ph = (np.sin((t - 0.4) * 9 - k * 1.1) + 1) / 2
+                r = 13 + 5 * ph
+                cxd, cyd = 70 + k * 45, 60
+                sd.ellipse([cxd - r, cyd - r, cxd + r, cyd + r], fill=(59, 169, 240, int(140 + 115 * ph)))
+            fr.alpha_composite(sm, ((W - bw_) // 2, by + bh_ - 120))
+        elif t >= 1.9:
+            p = min(1, (t - 1.9) / 0.35)
+            sc = 0.85 + 0.15 * ease_out_back(p, 1.4)
+            im = full.resize((max(1, round(bw_ * sc)), max(1, round((bh_ + 40) * sc))), Image.LANCZOS)
+            im.putalpha(im.getchannel("A").point(lambda v: int(v * min(1, p * 1.5))))
+            sh = Image.new("RGBA", im.size, (0, 0, 0, 0))
+            sh.putalpha(im.getchannel("A").point(lambda v: int(v * 0.5)))
+            paste(fr, sh.filter(ImageFilter.GaussianBlur(18)), (W - im.width) // 2 + 6, by + 14)
+            paste(fr, im, (W - im.width) // 2, by)
+        if bb.get("hint") and t >= 2.6:
+            ha = min(1, (t - 2.6) / 0.5)
+            hp = pill(bb["hint"], font("raleway", 34, 700), WHITE, (14, 14, 18, 215), (24, 10))
+            hp.putalpha(hp.getchannel("A").point(lambda v: int(v * ha)))
+            fr.alpha_composite(hp, ((W - hp.width) // 2, by + bh_ + 40 + 60))
+        fr.save(frames_dir / f"f{n:03d}.png")
+    inputs = args + ["-framerate", str(FPS), "-i", str(frames_dir / "f%03d.png")]
+    parts = [
+        f"[0:v]{chain}[b]",
+        "[1:v]format=rgba[o]",
+        "[b][o]overlay=eof_action=repeat,format=yuv420p[v]",
+        f"anullsrc=r=48000:cl=stereo,atrim=duration={dur}[a]",
+    ]
+    run([FFMPEG, "-y", "-v", "error", *inputs, "-filter_complex", ";".join(parts), "-map", "[v]", "-map", "[a]", "-t", str(dur), *ENCODE, str(out)])
+
+
 def paper_sheet(size, seed):
     rng = np.random.default_rng(seed)
     noise = rng.normal(0, 3.2, (size, size)).astype(np.float32)
@@ -1620,7 +1696,7 @@ def previews(out):
 
 def render(spec, out):
     with tempfile.TemporaryDirectory() as tmp:
-        {"cuts": render_cuts, "stack": render_stack, "grid": render_grid, "split": render_split, "agenda": render_agenda, "postcard": render_postcard, "board": render_board, "plan": render_plan, "badges": render_badges, "opener": render_opener, "tearoff": render_tearoff, "ticket": render_ticket, "note": render_note}[spec["layout"]](spec, out, tmp)
+        {"cuts": render_cuts, "stack": render_stack, "grid": render_grid, "split": render_split, "agenda": render_agenda, "postcard": render_postcard, "board": render_board, "plan": render_plan, "badges": render_badges, "opener": render_opener, "tearoff": render_tearoff, "ticket": render_ticket, "bubble": render_bubble, "note": render_note}[spec["layout"]](spec, out, tmp)
     return previews(out)
 
 
