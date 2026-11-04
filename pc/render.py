@@ -257,7 +257,18 @@ def render_cuts(spec, out, tmp):
         else:
             parts.append(f"anullsrc=r=48000:cl=stereo,atrim=duration={dur}[a{i}]")
     joined = "".join(f"[v{i}][a{i}]" for i in range(len(items)))
-    parts.append(f"{joined}concat=n={len(items)}:v=1:a=1[v][a0]")
+    fixed = text_layer(spec.get("fixed_text"))
+    parts.append(f"{joined}concat=n={len(items)}:v=1:a=1[{'vc' if fixed else 'v'}][a0]")
+    if fixed:
+        # one text pinned over the whole video, instead of a text per cut
+        full = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        if spec["fixed_text"].get("scrim"):
+            full.alpha_composite(shade)
+        full.alpha_composite(fixed)
+        total = sum(it.get("dur", default_dur) for it in items)
+        inputs += overlay_input(full, tmp, "fixed")
+        parts.append(f"[{n}:v]format=rgba,fade=t=in:st=0:d=0.3:alpha=1,trim=duration={total},setpts=PTS-STARTPTS[fx]")
+        parts.append("[vc][fx]overlay=shortest=1,format=yuv420p[v]")
     parts.append("[a0]loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000[a]")
     run([FFMPEG, "-y", "-v", "error", *inputs, "-filter_complex", ";".join(parts), "-map", "[v]", "-map", "[a]", *ENCODE, str(out)])
 
