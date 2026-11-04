@@ -427,8 +427,18 @@ def notepad_design(design, cells, rh, labels):
     shade = 246 - 14 * ((xx / W) * 0.5 + (yy / H) * 0.5)
     page = Image.fromarray(np.stack([shade, shade - 2, shade - 6], -1).clip(0, 255).astype(np.uint8), "RGB").convert("RGBA")
     m = design.get("pad_margin", 52)
-    top_pad, bot_pad = design["top"] - 250, design.get("pad_bottom", design["bottom"] + 70)
-    pw, ph = W - 2 * m, bot_pad - top_pad
+    pw = W - 2 * m
+    title = design.get("title") or []
+    imgs = []
+    for i, t in enumerate(title):
+        ftt = font("raleway", 58 if i == 0 else 36, 700 if i == 0 else 600)
+        for ln in wrap(t, ftt, pw - 160):  # wrap inside the notepad, away from its edges
+            imgs.append(draw_line(ln, ftt, BLUE if i == 0 else (235, 235, 235, 255)))
+    title_h = sum(im.height + 4 for im in imgs)
+    # the notepad starts high enough that the whole title fits above the photo window
+    top_pad = min(design["top"] - 250, design["top"] - title_h - 150)
+    bot_pad = design.get("pad_bottom", design["bottom"] + 70)
+    ph = bot_pad - top_pad
 
     def sheet(color, angle, dx, dy):
         im = Image.new("RGBA", (pw + 200, ph + 200), (0, 0, 0, 0))
@@ -460,13 +470,12 @@ def notepad_design(design, cells, rh, labels):
     page.alpha_composite(rings)
     # title in the event blue on the notepad
     title = design.get("title") or []
-    imgs = [draw_line(t, font("raleway", 58 if i == 0 else 36, 700 if i == 0 else 600), BLUE if i == 0 else (235, 235, 235, 255)) for i, t in enumerate(title)]
     y = top_pad + 95
     for im in imgs:
         page.alpha_composite(im, ((W - im.width) // 2, y))
         y += im.height + 4
     # optional agenda under the photos: [time, title] rows
-    if design.get("body"):
+    if design.get("body") or design.get("checklist"):
         y = design["bottom"] + 70
         if design.get("body_title"):
             bt = draw_line(design["body_title"], font("raleway", 40, 700), WHITE)
@@ -474,10 +483,10 @@ def notepad_design(design, cells, rh, labels):
             y += bt.height + 26
         ft, fb = font("raleway", 38, 700), font("raleway", 33, 600)
         tl_x = m + 60 + (40 if design.get("timeline") else 0)
-        col = max(round(ft.getlength(r[0])) for r in design["body"]) + 30
+        col = max([round(ft.getlength(r[0])) for r in design.get("body", [])] or [0]) + 30
         first = y
         dots = []
-        for when, what in design["body"]:
+        for when, what in design.get("body", []):
             tl = draw_line(when, ft, BLUE)
             page.alpha_composite(tl, (tl_x, y))
             dots.append(y + tl.height // 2)
@@ -488,10 +497,25 @@ def notepad_design(design, cells, rh, labels):
                 page.alpha_composite(li, (tl_x + col, yy))
                 yy += li.height
             y = max(y + tl.height, yy) + (46 if design.get("timeline") else 26)
+        if design.get("checklist"):
+            # campaign-style checklist: blue ticked boxes, one idea per line
+            fc = font("raleway", 38, 700)
+            y += 6
+            for item_text in design["checklist"]:
+                lines = wrap(item_text, fc, pw - 120 - 80)
+                bx, by_ = m + 60, y + 4
+                cd = ImageDraw.Draw(page)
+                cd.rounded_rectangle([bx, by_, bx + 46, by_ + 46], radius=10, fill=BLUE)
+                cd.line([(bx + 11, by_ + 24), (bx + 20, by_ + 34), (bx + 36, by_ + 13)], fill=(255, 255, 255, 255), width=6)
+                for ln in lines:
+                    li = draw_line(ln, fc, WHITE)
+                    page.alpha_composite(li, (bx + 72, y))
+                    y += li.height
+                y += 26
         if design.get("body_footer"):
             bf = draw_line(design["body_footer"], font("raleway", 40, 700), BLUE)
             page.alpha_composite(bf, ((W - bf.width) // 2, y + 10))
-        if design.get("timeline"):
+        if design.get("timeline") and dots:
             # a vertical timeline with one dot per block
             td = ImageDraw.Draw(page)
             lx = m + 70
