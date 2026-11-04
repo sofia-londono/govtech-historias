@@ -242,6 +242,9 @@ def render_cuts(spec, out, tmp):
     shade = scrim()
     for i, item in enumerate(items):
         dur = item.get("dur", default_dur)
+        if item.get("text") or (spec.get("text") and (len(items) == 1 or i == 0)):
+            dur = max(dur, spec.get("min_text_dur", 2.8))  # long enough to read on a phone
+        item["dur"] = dur
         args, chain, has_audio = source(item, i, tmp, W, H, dur)
         inputs += args
         v = n
