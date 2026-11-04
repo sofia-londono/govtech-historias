@@ -585,7 +585,7 @@ def render_agenda(spec, out, tmp):
     rows = cal["rows"]
     ft, fb, fs, fp = font("raleway", 38, 700), font("raleway", 33, 700), font("raleway", 26, 500), font("raleway", 24, 700)
     ink, grey = (25, 25, 28, 255), (110, 114, 120, 255)
-    tx_col = 50 + 230  # text column, after the timeline and the time
+    tx_col = 92 + max(round(ft.getlength(r[0])) for r in rows) + 30  # text column, after the timeline and the longest time
     row_imgs = []
     for row in rows:
         when, what, where = row[:3]
