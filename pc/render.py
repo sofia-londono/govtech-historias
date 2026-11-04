@@ -1191,6 +1191,10 @@ def render_note(spec, out, tmp):
     small1 = note.get("top", "bienvenidos al")
     big = note.get("big", "DÍA 1")
     small2 = note.get("bottom", "del GovTech Summit")
+    caption = None
+    if note.get("caption"):
+        # a short line under the note, white with a soft shadow
+        caption = text_layer({"lines": [note["caption"]], "size": 50, "pos": H // 2 + 560})
     for t in (small1, big, small2):
         if EMOJI.search(t):
             raise ValueError(f"emoji in text: {t}")
@@ -1266,7 +1270,13 @@ def render_note(spec, out, tmp):
             if a > 0:
                 lg = logo.copy()
                 lg.putalpha(lg.getchannel("A").point(lambda v: int(v * a)))
-                paste(frame, lg, (W - lg.width) // 2, BOTTOM - lg.height - 10)
+                paste(frame, lg, (W - lg.width) // 2, (H - 330 - lg.height) if note.get("caption") else (BOTTOM - lg.height - 10))
+        if caption:
+            a = min(1, max(0, (t - 2.0) / 0.5))
+            if a > 0:
+                cl = caption.copy()
+                cl.putalpha(cl.getchannel("A").point(lambda v: int(v * a)))
+                frame.alpha_composite(cl)
         p = min(1, max(0, (t - 0.1) / 0.7))
         py = cy - (1 - ease_out_back(p)) * 1500 if p < 1 else cy
         hit = t - 1.05  # the pin lands: small jolt
