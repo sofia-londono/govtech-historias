@@ -1246,7 +1246,7 @@ def render_tearoff(spec, out, tmp):
     tc = spec["tearoff"]
     item = {**spec["items"][0], "audio": False}
     a1, c1, _ = source(item, 0, tmp, W, H, dur)
-    c1 += ",hue=s=0,eq=brightness=-0.25:contrast=1.08"
+    c1 += f",hue=s={tc.get('bg_saturation', 0)},eq=brightness={tc.get('bg_brightness', -0.25)}:contrast=1.08"
     pw, ph = 740, 880
     old = calendar_page(pw, ph, tc["month"], tc["old_weekday"], tc["old_number"], [], 3)
     new = calendar_page(pw, ph, tc["month"], tc["weekday"], tc["number"], [
