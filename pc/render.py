@@ -31,6 +31,9 @@ FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
 W, H = 1080, 2400
 FPS = 30
 BOTTOM = H - 620  # above Instagram's reply bar, and inside the 9:16 area
+# Instagram draws the account name on top and the reply bar at the bottom of a story:
+# graphic elements stay between these lines (measured on a published story, 2026-11-04)
+SAFE_TOP, SAFE_BOTTOM = 440, 2040
 WHITE = (255, 255, 255, 255)
 BLUE = (59, 169, 240, 255)
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"}
@@ -539,6 +542,12 @@ def render_grid(spec, out, tmp):
     line = design.get("gap", 16) if design else 8
     margin = design.get("margin", 40) if design else 0
     top, bottom = (design["top"], design["bottom"]) if design else (0, H)
+    if design:
+        # leave room for the title above the photos, and keep everything in the safe area
+        n_title = len(design.get("title") or [])
+        top = max(top, SAFE_TOP + (80 if n_title else 0) + 90 * max(0, n_title))
+        bottom = min(bottom, SAFE_BOTTOM)
+        design = {**design, "top": top, "bottom": bottom}
     rh = (bottom - top - line * (rows - 1)) // rows
     rh -= rh % 2
     cells = []
