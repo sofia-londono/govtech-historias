@@ -895,6 +895,117 @@ def render_board(spec, out, tmp):
     run([FFMPEG, "-y", "-v", "error", *inputs, "-filter_complex", ";".join(parts), "-map", "[v]", "-map", "[a]", "-t", str(dur), *ENCODE, str(out)])
 
 
+def render_plan(spec, out, tmp):
+    """Floor-plan look: rooms drawn in event-blue lines with a table, chairs, door swing and the
+    sessions of each room; the clip plays in an inset. The drawing wipes in from the top."""
+    dur = spec.get("duration", 9)
+    pl = spec["plan"]
+    item = {**spec["items"][0], "audio": False}
+    s = 2
+    ink = (59, 169, 240, 255)
+    soft = (59, 169, 240, 90)
+    a1, c1, _ = source(item, 0, tmp, W, H, dur)
+    c1 += ",hue=s=0,boxblur=24:2,eq=brightness=-0.4"
+    iw_, ih_ = 640, 360
+    ix, iy = (W - iw_) // 2, pl.get("inset_top", 1760)
+    a2, c2, _ = source(item, 1, tmp, iw_, ih_, dur)
+    big = Image.new("RGBA", (W * s, H * s), (0, 0, 0, 0))
+    d = ImageDraw.Draw(big)
+    S = lambda v: round(v * s)
+    title = draw_line(pl["title"], font("raleway", 64, 700), WHITE)
+    sub = draw_line(pl.get("subtitle", ""), font("raleway", 36, 600), BLUE) if pl.get("subtitle") else None
+    rooms = pl["rooms"]
+    x0, x1 = 70, W - 70
+    top = pl.get("top", 520)
+    rh = pl.get("room_height", 560)
+    corridor = 90
+    # panel behind the plan
+    d.rounded_rectangle([S(x0 - 30), S(top - 40), S(x1 + 30), S(top + len(rooms) * rh + (len(rooms) - 1) * corridor + 40)], radius=S(28), fill=(10, 12, 16, 225))
+    fl, ft, fb = font("inter", 30, 800), font("raleway", 34, 700), font("raleway", 32, 600)
+    texts = []
+    for k, room in enumerate(rooms):
+        y0 = top + k * (rh + corridor)
+        y1 = y0 + rh
+        wall = S(6)
+        door_x = x1 - 240
+        # walls with a door gap at the bottom-left, and the door swing
+        d.line([(S(x0), S(y0)), (S(x1), S(y0))], fill=ink, width=wall)
+        d.line([(S(x0), S(y0)), (S(x0), S(y1))], fill=ink, width=wall)
+        d.line([(S(x1), S(y0)), (S(x1), S(y1))], fill=ink, width=wall)
+        d.line([(S(x0), S(y1)), (S(door_x), S(y1))], fill=ink, width=wall)
+        d.line([(S(door_x + 110), S(y1)), (S(x1), S(y1))], fill=ink, width=wall)
+        d.line([(S(door_x), S(y1)), (S(door_x), S(y1 - 110))], fill=ink, width=S(3))
+        d.arc([S(door_x - 110), S(y1 - 110), S(door_x + 110), S(y1 + 110)], 270, 360, fill=soft, width=S(3))
+        # table and chairs on the left half
+        tx0, ty0, tx1, ty1 = x0 + 70, y0 + 140, x0 + 340, y0 + rh - 170
+        d.rounded_rectangle([S(tx0), S(ty0), S(tx1), S(ty1)], radius=S(14), outline=ink, width=S(4))
+        n = room.get("chairs", 8)
+        per = n // 2
+        for i in range(per):
+            cx = tx0 + (i + 0.5) * (tx1 - tx0) / per
+            for cy in (ty0 - 32, ty1 + 32):
+                d.ellipse([S(cx - 18), S(cy - 18), S(cx + 18), S(cy + 18)], outline=ink, width=S(3))
+        texts.append((draw_line(room["name"], fl, BLUE), (x0 + 24, y0 + 26)))
+        # sessions of the room on the right half
+        sx = x0 + 420
+        sy = y0 + 110
+        tw = max(round(ft.getlength(t)) for t, _ in room["sessions"]) + 24
+        for when, what in room["sessions"]:
+            tl = draw_line(when, ft, BLUE)
+            texts.append((tl, (sx, sy)))
+            yy = sy + 3
+            for ln in wrap(what, fb, x1 - 30 - sx - tw):
+                li = draw_line(ln, fb, WHITE)
+                texts.append((li, (sx + tw, yy)))
+                yy += li.height
+            d.line([(S(sx), S(max(sy + tl.height, yy) + 14)), (S(x1 - 40), S(max(sy + tl.height, yy) + 14))], fill=(59, 169, 240, 60), width=S(2))
+            sy = max(sy + tl.height, yy) + 36
+        if k < len(rooms) - 1:
+            cy = y1 + corridor // 2
+            lab = draw_line(pl.get("corridor", "Pasillo"), font("raleway", 26, 600), (160, 170, 180, 255))
+            texts.append((lab, ((W - lab.width) // 2, cy - lab.height // 2)))
+            for xx in range(x0 + 20, x1 - 20, 40):
+                if abs(xx - W // 2) > lab.width // 2 + 30:
+                    d.line([(S(xx), S(cy)), (S(xx + 18), S(cy))], fill=soft, width=S(3))
+    # inset frame for the clip
+    d.rounded_rectangle([S(ix - 6), S(iy - 6), S(ix + iw_ + 6), S(iy + ih_ + 6)], radius=S(22), outline=ink, width=S(5))
+    plan = big.resize((W, H), Image.LANCZOS)
+    for im, pos in texts:
+        plan.alpha_composite(im, pos)
+    ty = top - 70 - title.height - (sub.height + 6 if sub else 0)
+    plan.alpha_composite(title, ((W - title.width) // 2, ty))
+    if sub:
+        plan.alpha_composite(sub, ((W - sub.width) // 2, ty + title.height + 6))
+    if pl.get("inset_label"):
+        il = pill(pl["inset_label"], font("raleway", 28, 700), (4, 32, 47, 255), BLUE, (16, 6))
+        plan.alpha_composite(il, ((W - il.width) // 2, iy - il.height - 22))
+    hole = Image.new("L", (W, H), 255)
+    ImageDraw.Draw(hole).rounded_rectangle([ix, iy, ix + iw_, iy + ih_], radius=18, fill=0)
+    plan.putalpha(Image.fromarray(np.minimum(np.asarray(plan.getchannel("A")), np.asarray(hole))))
+    # wipe-in frames: the plan draws itself from top to bottom
+    frames_dir = Path(tmp) / "plan"
+    frames_dir.mkdir()
+    nfr = round(1.8 * FPS)
+    alpha = np.asarray(plan.getchannel("A")).astype(np.float32)
+    rows = np.arange(H, dtype=np.float32)[:, None]
+    for n in range(nfr + 1):
+        edge = (n / nfr) * (H + 200)
+        m = np.clip((edge - rows) / 200, 0, 1)
+        fr = plan.copy()
+        fr.putalpha(Image.fromarray((alpha * m).astype(np.uint8)))
+        fr.save(frames_dir / f"f{n:03d}.png")
+    inputs = a1 + a2 + ["-framerate", str(FPS), "-i", str(frames_dir / "f%03d.png")]
+    parts = [
+        f"[0:v]{c1}[bg]",
+        f"[1:v]{c2}[win]",
+        f"[bg][win]overlay={ix}:{iy}[s0]",
+        "[2:v]format=rgba[pl]",
+        "[s0][pl]overlay=eof_action=repeat,format=yuv420p[v]",
+        f"anullsrc=r=48000:cl=stereo,atrim=duration={dur}[a]",
+    ]
+    run([FFMPEG, "-y", "-v", "error", *inputs, "-filter_complex", ";".join(parts), "-map", "[v]", "-map", "[a]", "-t", str(dur), *ENCODE, str(out)])
+
+
 def paper_sheet(size, seed):
     rng = np.random.default_rng(seed)
     noise = rng.normal(0, 3.2, (size, size)).astype(np.float32)
@@ -1056,7 +1167,7 @@ def previews(out):
 
 def render(spec, out):
     with tempfile.TemporaryDirectory() as tmp:
-        {"cuts": render_cuts, "stack": render_stack, "grid": render_grid, "split": render_split, "agenda": render_agenda, "postcard": render_postcard, "board": render_board, "note": render_note}[spec["layout"]](spec, out, tmp)
+        {"cuts": render_cuts, "stack": render_stack, "grid": render_grid, "split": render_split, "agenda": render_agenda, "postcard": render_postcard, "board": render_board, "plan": render_plan, "note": render_note}[spec["layout"]](spec, out, tmp)
     return previews(out)
 
 
