@@ -1476,6 +1476,23 @@ def render_bubble(spec, out, tmp):
         full.alpha_composite(q, ((bw_ - q.width) // 2, y))
         y += q.height
     small = bubble(230, 120)
+    # explanation under the bubble: a dark rounded box, wrapped inside the side margins
+    fh = font("raleway", 36, 700)
+    paras = bb.get("hint") or []
+    paras = [paras] if isinstance(paras, str) else paras
+    hl = [draw_line(ln, fh, WHITE) for para in paras for ln in wrap(para, fh, W - 2 * 90 - 140)]
+    hint_box = Image.new("RGBA", (max([l.width for l in hl] or [1]) + 70, sum(l.height for l in hl) + 44), (0, 0, 0, 0))
+    if hl:
+        ImageDraw.Draw(hint_box).rounded_rectangle([0, 0, hint_box.width - 1, hint_box.height - 1], radius=28, fill=(14, 14, 18, 215))
+        yh = 22
+        for l in hl:
+            hint_box.alpha_composite(l, ((hint_box.width - l.width) // 2, yh))
+            yh += l.height
+
+    def hint_img(a):
+        im = hint_box.copy()
+        im.putalpha(im.getchannel("A").point(lambda v: int(v * a)))
+        return im
     frames_dir = Path(tmp) / "bubble"
     frames_dir.mkdir()
     nfr = round(3.4 * FPS)
@@ -1508,12 +1525,7 @@ def render_bubble(spec, out, tmp):
             paste(fr, im, (W - im.width) // 2, by)
         if bb.get("hint") and t >= 2.6:
             ha = min(1, (t - 2.6) / 0.5)
-            hs = 34
-            while font("raleway", hs, 700).getlength(bb["hint"]) > W - 2 * 90 - 120 and hs > 24:
-                hs -= 2  # keep the pill well inside the side margins
-            hp = pill(bb["hint"], font("raleway", hs, 700), WHITE, (14, 14, 18, 215), (24, 10))
-            hp.putalpha(hp.getchannel("A").point(lambda v: int(v * ha)))
-            fr.alpha_composite(hp, ((W - hp.width) // 2, by + bh_ + 40 + 60))
+            fr.alpha_composite(hint_img(ha), ((W - hint_box.width) // 2, by + bh_ + 40 + 50))
         if bb.get("cta") and t >= 2.9:
             # the call to action: a big blue pill that gently pulses
             ca = min(1, (t - 2.9) / 0.4)
@@ -1521,7 +1533,7 @@ def render_bubble(spec, out, tmp):
             cp = pill(bb["cta"], font("raleway", 50, 800), (4, 32, 47, 255), BLUE, (40, 18))
             cp = cp.resize((round(cp.width * pulse), round(cp.height * pulse)), Image.LANCZOS)
             cp.putalpha(cp.getchannel("A").point(lambda v: int(v * ca)))
-            fr.alpha_composite(cp, ((W - cp.width) // 2, by + bh_ + 40 + 160 - (cp.height - 96) // 2))
+            fr.alpha_composite(cp, ((W - cp.width) // 2, by + bh_ + 40 + 50 + hint_box.height + 40 - (cp.height - 96) // 2))
         fr.save(frames_dir / f"f{n:03d}.png")
     inputs = args + ["-framerate", str(FPS), "-i", str(frames_dir / "f%03d.png")]
     parts = [
