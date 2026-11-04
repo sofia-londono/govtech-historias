@@ -1628,6 +1628,109 @@ def render_lockscreen(spec, out, tmp):
     run([FFMPEG, "-y", "-v", "error", *inputs, "-filter_complex", ";".join(parts), "-map", "[v]", "-map", "[a]", "-t", str(dur), *ENCODE, str(out)])
 
 
+def chat_bubble(text, maxw, fill, ink, tail_left=True):
+    f = font("raleway", 38, 700)
+    lines = wrap(text, f, maxw - 80)
+    imgs = [draw_line(ln, f, ink) for ln in lines]
+    bw_ = max(i.width for i in imgs) + 70
+    bh_ = sum(i.height for i in imgs) + 50
+    s = 2
+    im = Image.new("RGBA", ((bw_ + 20) * s, (bh_ + 10) * s), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    ox = 20 if tail_left else 0
+    d.rounded_rectangle([ox * s, 0, (ox + bw_) * s - 1, bh_ * s - 1], radius=34 * s, fill=fill)
+    if tail_left:
+        d.polygon([(ox * s, (bh_ - 34) * s), ((ox + 30) * s, (bh_ - 4) * s), (0, (bh_ + 8) * s)], fill=fill)
+    im = im.resize((bw_ + 20, bh_ + 10), Image.LANCZOS)
+    y = 25
+    for i in imgs:
+        im.alpha_composite(i, (ox + 35, y))
+        y += i.height
+    return im
+
+
+def render_chat(spec, out, tmp):
+    """A chat thread over the dimmed clip: the account 'types' and sends messages one by one,
+    ending with space for Instagram's question sticker."""
+    dur = spec.get("duration", 11)
+    ch = spec["chat"]
+    item = {**spec["items"][0], "audio": False}
+    args, chain, _ = source(item, 0, tmp, W, H, dur)
+    chain += ",gblur=sigma=5,eq=brightness=-0.3"
+    x0, cw = 90, W - 180
+    # header like a chat app: avatar, name, status
+    head = Image.new("RGBA", (cw, 130), (0, 0, 0, 0))
+    hd = ImageDraw.Draw(head)
+    hd.rounded_rectangle([0, 0, cw - 1, 129], radius=36, fill=(20, 22, 26, 225))
+    hd.ellipse([24, 22, 110, 108], fill=BLUE)
+    g = draw_line("G", font("inter", 50, 800), WHITE)
+    head.alpha_composite(g, (67 - g.width // 2, 65 - g.height // 2))
+    nm = draw_line(ch.get("name", "GovTech Summit"), font("raleway", 38, 800), WHITE)
+    head.alpha_composite(nm, (132, 26))
+    st = draw_line(ch.get("status", "en línea"), font("raleway", 28, 600), (120, 200, 255, 255))
+    head.alpha_composite(st, (132, 26 + nm.height + 2))
+    msgs = []
+    for m in ch["messages"]:
+        blue = m.get("style") == "blue"
+        msgs.append(chat_bubble(m["text"], cw - 60, BLUE if blue else (248, 248, 246, 255), (4, 32, 47, 255) if blue else (22, 22, 26, 255)))
+    typing = chat_bubble("mmmm", 200, (248, 248, 246, 255), (0, 0, 0, 0))  # empty bubble for the dots
+    top = SAFE_TOP + 10
+    y_msgs = top + head.height + 40
+    gap = 24
+    starts, t0 = [], 0.6
+    for _ in msgs:
+        starts.append(t0 + 0.9)  # 0.9 s of typing before each message
+        t0 += 0.9 + 1.6
+    ys, yy = [], y_msgs
+    for m in msgs:
+        ys.append(yy)
+        yy += m.height + gap
+    end_y = yy
+    hint = pill(ch["hint"], font("raleway", 34, 700), WHITE, (20, 22, 26, 225), (26, 12)) if ch.get("hint") else None
+    assert end_y + (hint.height + 260 if hint else 0) <= SAFE_BOTTOM, "chat runs past the visible area"
+    frames_dir = Path(tmp) / "chat"
+    frames_dir.mkdir()
+    nfr = round((starts[-1] + 1.2) * FPS)
+    for n in range(nfr + 1):
+        t = n / FPS
+        fr = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        ha = min(1, t / 0.4)
+        h2 = head.copy()
+        h2.putalpha(h2.getchannel("A").point(lambda v: int(v * ha)))
+        fr.alpha_composite(h2, (x0, top))
+        for m, st_, y in zip(msgs, starts, ys):
+            if st_ - 0.9 <= t < st_:
+                # typing dots in the slot where the message will appear
+                ty = typing.copy()
+                d = ImageDraw.Draw(ty)
+                for k in range(3):
+                    ph = (np.sin((t - st_) * 10 - k * 1.2) + 1) / 2
+                    r = 9 + 4 * ph
+                    cx, cy = 60 + k * 36, ty.height // 2 - 4
+                    d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(59, 169, 240, int(130 + 125 * ph)))
+                fr.alpha_composite(ty, (x0, y))
+            elif t >= st_:
+                p = min(1, (t - st_) / 0.3)
+                sc = 0.9 + 0.1 * ease_out_back(p, 1.5)
+                im = m.resize((max(1, round(m.width * sc)), max(1, round(m.height * sc))), Image.LANCZOS)
+                im.putalpha(im.getchannel("A").point(lambda v: int(v * min(1, p * 1.6))))
+                fr.alpha_composite(im, (x0, y + round((m.height - im.height) / 2)))
+        if hint and t >= starts[-1] + 0.5:
+            a = min(1, (t - starts[-1] - 0.5) / 0.4)
+            h3 = hint.copy()
+            h3.putalpha(h3.getchannel("A").point(lambda v: int(v * a)))
+            fr.alpha_composite(h3, ((W - hint.width) // 2, end_y + 30))
+        fr.save(frames_dir / f"f{n:03d}.png")
+    inputs = args + ["-framerate", str(FPS), "-i", str(frames_dir / "f%03d.png")]
+    parts = [
+        f"[0:v]{chain}[b]",
+        "[1:v]format=rgba[o]",
+        "[b][o]overlay=eof_action=repeat,format=yuv420p[v]",
+        f"anullsrc=r=48000:cl=stereo,atrim=duration={dur}[a]",
+    ]
+    run([FFMPEG, "-y", "-v", "error", *inputs, "-filter_complex", ";".join(parts), "-map", "[v]", "-map", "[a]", "-t", str(dur), *ENCODE, str(out)])
+
+
 def paper_sheet(size, seed):
     rng = np.random.default_rng(seed)
     noise = rng.normal(0, 3.2, (size, size)).astype(np.float32)
@@ -1802,7 +1905,7 @@ def previews(out):
 
 def render(spec, out):
     with tempfile.TemporaryDirectory() as tmp:
-        {"cuts": render_cuts, "stack": render_stack, "grid": render_grid, "split": render_split, "agenda": render_agenda, "postcard": render_postcard, "board": render_board, "plan": render_plan, "badges": render_badges, "opener": render_opener, "tearoff": render_tearoff, "ticket": render_ticket, "bubble": render_bubble, "lockscreen": render_lockscreen, "note": render_note}[spec["layout"]](spec, out, tmp)
+        {"cuts": render_cuts, "stack": render_stack, "grid": render_grid, "split": render_split, "agenda": render_agenda, "postcard": render_postcard, "board": render_board, "plan": render_plan, "badges": render_badges, "opener": render_opener, "tearoff": render_tearoff, "ticket": render_ticket, "bubble": render_bubble, "lockscreen": render_lockscreen, "chat": render_chat, "note": render_note}[spec["layout"]](spec, out, tmp)
     return previews(out)
 
 
