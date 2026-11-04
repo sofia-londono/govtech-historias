@@ -1051,7 +1051,7 @@ def render_badges(spec, out, tmp):
     dur = spec.get("duration", 9)
     bg = spec["badges"]
     item = {**spec["items"][0], "audio": False}
-    ww = bg.get("window_width", W - 140)
+    ww = bg.get("window_width", W - 180)
     wh = round(ww * 9 / 16) // 2 * 2
     wx, wy = (W - ww) // 2, bg.get("window_top", 440)
     col = tuple(bg.get("color", BLUE))
@@ -1061,7 +1061,8 @@ def render_badges(spec, out, tmp):
     c1 += ",hue=s=0,boxblur=24:2,eq=brightness=-0.42"
     cards = bg["cards"]
     n = len(cards)
-    bw = (W - 80 - 40 * (n - 1)) // n
+    side = bg.get("side", 90)  # margin to the screen edges
+    bw = (W - 2 * side - 40 * (n - 1)) // n
     bh = bg.get("badge_height", 760)
     top_y = wy + wh + bg.get("drop", 170)
     imgs = [badge_card(c, bw, bh) for c in cards]
@@ -1099,7 +1100,7 @@ def render_badges(spec, out, tmp):
         front = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         bd = ImageDraw.Draw(back)
         for i, im in enumerate(imgs):
-            cx = 40 + i * (bw + 40) + bw // 2
+            cx = side + i * (bw + 40) + bw // 2
             st = 0.15 + 0.35 * i
             p = min(1, max(0, (t - st) / 0.65))
             # the badge slides straight down out of the clip window's bottom edge, then swings a little
@@ -1380,14 +1381,17 @@ def render_note(spec, out, tmp):
     bg_big = ImageOps.fit(base, (bw, bh), Image.LANCZOS, centering=spec["items"][0].get("focus", [0.5, 0.5]))
     bg_big = Image.eval(bg_big, lambda v: int(v * 0.72)).convert("RGB")
 
-    size = 800
+    size = note.get("size", 700)  # leaves a margin to the screen edges
     paper = paper_sheet(size, 1)
     under = paper_sheet(size, 2)
     rows = []
     # Raleway Bold like the rest of the stories; "inter" keeps the campaign's stretched title
     family = note.get("font", "raleway")
     small_w, big_w, big_stretch = (700, 800, 1.0) if family == "raleway" else (500, 800, 1.28)
-    f1 = font(family, 58, small_w)
+    fs1 = 58
+    while max(font(family, fs1, small_w).getlength(t) for t in (small1, small2)) > size - 110:
+        fs1 -= 2
+    f1 = font(family, fs1, small_w)
     fit = 250
     while font(family, fit, big_w).getlength(big) > size - 120:
         fit -= 6
