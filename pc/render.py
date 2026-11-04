@@ -1508,7 +1508,10 @@ def render_bubble(spec, out, tmp):
             paste(fr, im, (W - im.width) // 2, by)
         if bb.get("hint") and t >= 2.6:
             ha = min(1, (t - 2.6) / 0.5)
-            hp = pill(bb["hint"], font("raleway", 34, 700), WHITE, (14, 14, 18, 215), (24, 10))
+            hs = 34
+            while font("raleway", hs, 700).getlength(bb["hint"]) > W - 2 * 90 - 120 and hs > 24:
+                hs -= 2  # keep the pill well inside the side margins
+            hp = pill(bb["hint"], font("raleway", hs, 700), WHITE, (14, 14, 18, 215), (24, 10))
             hp.putalpha(hp.getchannel("A").point(lambda v: int(v * ha)))
             fr.alpha_composite(hp, ((W - hp.width) // 2, by + bh_ + 40 + 60))
         fr.save(frames_dir / f"f{n:03d}.png")
