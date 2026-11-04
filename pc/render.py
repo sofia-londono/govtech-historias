@@ -1218,6 +1218,112 @@ def render_opener(spec, out, tmp):
     run([FFMPEG, "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", str(lst), "-c", "copy", "-movflags", "+faststart", str(out)])
 
 
+def calendar_page(pw, ph, month, weekday, number, lines, seed):
+    """One tear-off calendar page on paper texture: blue month band, big day number, lines below."""
+    paper = paper_sheet(max(pw, ph), seed).crop((0, 0, pw, ph))
+    d = ImageDraw.Draw(paper)
+    band = 150
+    d.rectangle([0, 0, pw, band], fill=BLUE)
+    mo = draw_line(month, font("raleway", 50, 800), WHITE)
+    paper.alpha_composite(mo, ((pw - mo.width) // 2, 34))
+    wd = draw_line(weekday, font("raleway", 40, 700), (90, 94, 100, 255))
+    paper.alpha_composite(wd, ((pw - wd.width) // 2, band + 26))
+    num = draw_line(number, font("inter", 330, 800), (22, 22, 26, 255), 1.1)
+    ny = band + 70
+    paper.alpha_composite(num, ((pw - num.width) // 2, ny))
+    y = ny + num.height + 4
+    for text, size, color, weight in lines:
+        li = draw_line(text, font("raleway", size, weight), color)
+        paper.alpha_composite(li, ((pw - li.width) // 2, y))
+        y += li.height + 2
+    return paper
+
+
+def render_tearoff(spec, out, tmp):
+    """Day opener: a desk calendar over the clip; yesterday's page tears off and falls,
+    revealing today's page; then a line and the logo."""
+    dur = spec.get("duration", 7)
+    tc = spec["tearoff"]
+    item = {**spec["items"][0], "audio": False}
+    a1, c1, _ = source(item, 0, tmp, W, H, dur)
+    c1 += ",hue=s=0,eq=brightness=-0.25:contrast=1.08"
+    pw, ph = 740, 880
+    old = calendar_page(pw, ph, tc["month"], tc["old_weekday"], tc["old_number"], [], 3)
+    new = calendar_page(pw, ph, tc["month"], tc["weekday"], tc["number"], [
+        (tc.get("top", "Bienvenidos al"), 46, (25, 25, 28, 255), 600),
+        (tc.get("big", "DÍA 2"), 76, BLUE, 800),
+        (tc.get("bottom", "del GovTech Summit"), 40, (25, 25, 28, 255), 600),
+    ], 5)
+    under = paper_sheet(ph, 9).crop((0, 0, pw, ph))
+    cx, top = W // 2, tc.get("top_y", 560)
+    caption = text_layer({"lines": [tc["caption"]], "size": 50, "pos": top + ph + 250}) if tc.get("caption") else None
+    logo = None
+    if tc.get("logo"):
+        src = Image.open(tc["logo"]).convert("RGBA")
+        white = Image.new("RGBA", src.size, (255, 255, 255, 255))
+        white.putalpha(src.getchannel("A"))
+        lw = 500
+        logo = white.resize((lw, round(src.height * lw / src.width)), Image.LANCZOS)
+    rings = Image.new("RGBA", (W * 2, 140), (0, 0, 0, 0))
+    rd = ImageDraw.Draw(rings)
+    for k in range(2):
+        rx = (cx - pw // 2 + pw * (0.25 + 0.5 * k)) * 2
+        rd.rounded_rectangle([rx - 22, 0, rx + 22, 150], radius=22, fill=(150, 152, 156, 255))
+        rd.rounded_rectangle([rx - 10, 12, rx + 2, 138], radius=6, fill=(228, 229, 231, 255))
+    rings = rings.resize((W, 70), Image.LANCZOS)
+    shadow = Image.new("L", (pw + 160, ph + 160), 0)
+    ImageDraw.Draw(shadow).rectangle([80, 96, pw + 80, ph + 96], fill=180)
+    shadow = shadow.filter(ImageFilter.GaussianBlur(26))
+    sh_rgba = Image.new("RGBA", shadow.size, (0, 0, 0, 255))
+    sh_rgba.putalpha(shadow)
+    frames_dir = Path(tmp) / "tear"
+    frames_dir.mkdir()
+    nfr = round(3.6 * FPS)
+    for n in range(nfr + 1):
+        t = n / FPS
+        fr = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        p = min(1, max(0, t / 0.6))
+        dy = round((1 - ease_out_back(p, 1.1)) * -900) if p < 1 else 0
+        y0 = top + dy
+        paste(fr, sh_rgba, cx - pw // 2 - 80, y0 - 60)
+        # pad thickness: two sheet edges under the pages
+        paste(fr, under, cx - pw // 2 + 8, y0 + 14)
+        paste(fr, under, cx - pw // 2 + 4, y0 + 7)
+        paste(fr, new, cx - pw // 2, y0)
+        tt = t - 1.0  # yesterday's page lifts, tears and falls away
+        if tt < 0:
+            paste(fr, old, cx - pw // 2, y0)
+        elif tt < 1.4:
+            ang = -min(40, 10 + tt * 45)
+            fall = round(0.5 * 2600 * tt ** 2)
+            shift = round(tt * 260)
+            pg = old.copy()
+            if tt > 0.6:
+                pg.putalpha(pg.getchannel("A").point(lambda v: int(v * max(0, 1 - (tt - 0.6) / 0.8))))
+            rot = pg.rotate(ang, Image.BICUBIC, expand=True)
+            paste(fr, rot, cx - rot.width // 2 + shift, y0 - 40 + fall)
+        fr.alpha_composite(rings, (0, y0 - 34))
+        ca = min(1, max(0, (t - 2.3) / 0.5))
+        if caption and ca > 0:
+            c2 = caption.copy()
+            c2.putalpha(c2.getchannel("A").point(lambda v: int(v * ca)))
+            fr.alpha_composite(c2)
+        la = min(1, max(0, (t - 2.8) / 0.5))
+        if logo and la > 0:
+            l2 = logo.copy()
+            l2.putalpha(l2.getchannel("A").point(lambda v: int(v * la)))
+            paste(fr, l2, (W - logo.width) // 2, H - 330 - logo.height)
+        fr.save(frames_dir / f"f{n:03d}.png")
+    inputs = a1 + ["-framerate", str(FPS), "-i", str(frames_dir / "f%03d.png")]
+    parts = [
+        f"[0:v]{c1}[bg]",
+        "[1:v]format=rgba[cal]",
+        "[bg][cal]overlay=eof_action=repeat,format=yuv420p[v]",
+        f"anullsrc=r=48000:cl=stereo,atrim=duration={dur}[a]",
+    ]
+    run([FFMPEG, "-y", "-v", "error", *inputs, "-filter_complex", ";".join(parts), "-map", "[v]", "-map", "[a]", "-t", str(dur), *ENCODE, str(out)])
+
+
 def paper_sheet(size, seed):
     rng = np.random.default_rng(seed)
     noise = rng.normal(0, 3.2, (size, size)).astype(np.float32)
@@ -1389,7 +1495,7 @@ def previews(out):
 
 def render(spec, out):
     with tempfile.TemporaryDirectory() as tmp:
-        {"cuts": render_cuts, "stack": render_stack, "grid": render_grid, "split": render_split, "agenda": render_agenda, "postcard": render_postcard, "board": render_board, "plan": render_plan, "badges": render_badges, "opener": render_opener, "note": render_note}[spec["layout"]](spec, out, tmp)
+        {"cuts": render_cuts, "stack": render_stack, "grid": render_grid, "split": render_split, "agenda": render_agenda, "postcard": render_postcard, "board": render_board, "plan": render_plan, "badges": render_badges, "opener": render_opener, "tearoff": render_tearoff, "note": render_note}[spec["layout"]](spec, out, tmp)
     return previews(out)
 
 
