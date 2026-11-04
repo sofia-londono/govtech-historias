@@ -1042,13 +1042,13 @@ def badge_card(b, bw, bh):
 
 def render_badges(spec, out, tmp):
     """Room-by-room schedule as event badges hanging from lanyards; they drop in and swing to rest.
-    The clip plays in a window on top."""
+    Layers: blurred clip, lanyards (behind), framed clip window, badges and texts (in front)."""
     dur = spec.get("duration", 9)
     bg = spec["badges"]
     item = {**spec["items"][0], "audio": False}
-    ww = W - 120
+    ww = W - 140
     wh = round(ww * 9 / 16) // 2 * 2
-    wx, wy = 60, bg.get("window_top", 420)
+    wx, wy = 70, bg.get("window_top", 440)
     a1, c1, _ = source(item, 0, tmp, W, H, dur)
     a2, c2, _ = source(item, 1, tmp, ww, wh, dur)
     c1 += ",hue=s=0,boxblur=24:2,eq=brightness=-0.42"
@@ -1059,53 +1059,73 @@ def render_badges(spec, out, tmp):
     top_y = wy + wh + bg.get("drop", 170)
     imgs = [badge_card(c, bw, bh) for c in cards]
     title = draw_line(bg["title"], font("raleway", 64, 700), WHITE)
-    sub = draw_line(bg.get("subtitle", ""), font("raleway", 36, 600), BLUE) if bg.get("subtitle") else None
+    sub = draw_line(bg.get("subtitle", ""), font("raleway", 36, 600), WHITE) if bg.get("subtitle") else None
     static = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    ty = wy - 40 - title.height - (sub.height + 6 if sub else 0)
+    ty = wy - 46 - title.height - (sub.height + 8 if sub else 0)
     static.alpha_composite(title, ((W - title.width) // 2, ty))
     if sub:
-        static.alpha_composite(sub, ((W - sub.width) // 2, ty + title.height + 6))
-    if bg.get("footer"):
-        fo = draw_line(bg["footer"], font("raleway", 40, 700), BLUE)
-        static.alpha_composite(fo, ((W - fo.width) // 2, top_y + bh + 40))
-    frames_dir = Path(tmp) / "badges"
-    frames_dir.mkdir()
-    nfr = round(2.8 * FPS)
+        static.alpha_composite(sub, ((W - sub.width) // 2, ty + title.height + 8))
+    # frame around the clip window: rounded blue border with a soft shadow
+    fr_ = Image.new("RGBA", (W * 2, H * 2), (0, 0, 0, 0))
+    ImageDraw.Draw(fr_).rounded_rectangle([(wx - 8) * 2, (wy - 8) * 2, (wx + ww + 8) * 2, (wy + wh + 8) * 2], radius=34 * 2, outline=BLUE, width=7 * 2)
+    static.alpha_composite(fr_.resize((W, H), Image.LANCZOS))
+    if bg.get("cta"):
+        cy = top_y + bh + 50
+        for k, ln in enumerate(bg["cta"]):
+            li = draw_line(ln, font("raleway", 46 if k == 0 else 34, 700 if k == 0 else 600), BLUE if k == 0 else WHITE)
+            static.alpha_composite(li, ((W - li.width) // 2, cy))
+            cy += li.height + 8
+    mask = Image.new("L", (ww * 2, wh * 2), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, ww * 2 - 1, wh * 2 - 1], radius=28 * 2, fill=255)
+    mask_path = Path(tmp) / "winmask.png"
+    mask.resize((ww, wh), Image.LANCZOS).save(mask_path)
+    back_dir, front_dir = Path(tmp) / "back", Path(tmp) / "front"
+    back_dir.mkdir()
+    front_dir.mkdir()
+    nfr = round(3.2 * FPS)
     for f in range(nfr + 1):
         t = f / FPS
-        fr = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        back = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        front = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        bd = ImageDraw.Draw(back)
         for i, im in enumerate(imgs):
             cx = 40 + i * (bw + 40) + bw // 2
             st = 0.15 + 0.35 * i
-            p = min(1, max(0, (t - st) / 0.6))
+            p = min(1, max(0, (t - st) / 0.7))
             drop = (1 - ease_out_back(p, 1.1)) * -(bh + 500) if p < 1 else 0
-            hit = t - st - 0.6
-            ang = (5 if i % 2 == 0 else -5) * np.exp(-hit * 2.6) * np.cos(hit * 7) if hit > 0 else (6 if i % 2 == 0 else -6) * (1 - p)
-            # lanyard: two blue straps from the top edge to the clip
-            strap = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-            sd = ImageDraw.Draw(strap)
+            hit = t - st - 0.7
+            side = 1 if i % 2 == 0 else -1
+            ang = 5 * side * np.exp(-hit * 2.4) * np.cos(hit * 7) if hit > 0 else 6 * side * (1 - p)
             clip_y = round(top_y + drop)
-            sx = cx + np.sin(np.radians(ang)) * 0
+            # lanyards start behind the clip window, so they never cross the titles
             for off in (-34, 34):
-                sd.line([(cx + off * 2.2, 0), (sx + off * 0.5, clip_y - 30)], fill=(30, 128, 196, 255), width=26)
-                sd.line([(cx + off * 2.2 - 6, 0), (sx + off * 0.5 - 6, clip_y - 30)], fill=BLUE, width=10)
-            sd.rounded_rectangle([sx - 22, clip_y - 46, sx + 22, clip_y + 30], radius=8, fill=(185, 188, 192, 255))
-            sd.rounded_rectangle([sx - 10, clip_y - 38, sx + 10, clip_y + 22], radius=5, fill=(120, 124, 128, 255))
-            fr.alpha_composite(strap)
+                bd.line([(cx + off * 1.6, wy + 40), (cx + off * 0.5, clip_y - 30)], fill=(30, 128, 196, 255), width=26)
+                bd.line([(cx + off * 1.6 - 6, wy + 40), (cx + off * 0.5 - 6, clip_y - 30)], fill=BLUE, width=10)
+            fd = ImageDraw.Draw(front)
+            fd.rounded_rectangle([cx - 22, clip_y - 46, cx + 22, clip_y + 30], radius=8, fill=(185, 188, 192, 255))
+            fd.rounded_rectangle([cx - 10, clip_y - 38, cx + 10, clip_y + 22], radius=5, fill=(120, 124, 128, 255))
             rot = im.rotate(ang, Image.BICUBIC, expand=True, center=(bw // 2, 0))
             sh = Image.new("RGBA", rot.size, (0, 0, 0, 0))
             sh.putalpha(rot.getchannel("A").point(lambda a: a * 0.55))
-            paste(fr, sh.filter(ImageFilter.GaussianBlur(14)), round(cx - rot.width / 2 + 8), clip_y + 16)
-            paste(fr, rot, round(cx - rot.width / 2), clip_y)
-        fr.alpha_composite(static)
-        fr.save(frames_dir / f"f{f:03d}.png")
-    inputs = a1 + a2 + ["-framerate", str(FPS), "-i", str(frames_dir / "f%03d.png")]
+            paste(front, sh.filter(ImageFilter.GaussianBlur(14)), round(cx - rot.width / 2 + 8), clip_y + 16)
+            paste(front, rot, round(cx - rot.width / 2), clip_y)
+        merged = static.copy()
+        merged.alpha_composite(front)
+        back.save(back_dir / f"f{f:03d}.png")
+        merged.save(front_dir / f"f{f:03d}.png")
+    inputs = a1 + a2 + ["-framerate", str(FPS), "-i", str(back_dir / "f%03d.png"),
+                        "-framerate", str(FPS), "-i", str(front_dir / "f%03d.png"),
+                        "-loop", "1", "-framerate", str(FPS), "-i", str(mask_path)]
     parts = [
         f"[0:v]{c1}[bg]",
-        "[2:v]format=rgba[bd]",
-        "[bg][bd]overlay=eof_action=repeat[s0]",
-        f"[1:v]{c2}[win]",
-        f"[s0][win]overlay={wx}:{wy},format=yuv420p[v]",
+        "[2:v]format=rgba[bk]",
+        "[bg][bk]overlay=eof_action=repeat[s0]",
+        f"[1:v]{c2},format=rgba[w0]",
+        f"[4:v]format=gray,trim=duration={dur},setpts=PTS-STARTPTS[m]",
+        "[w0][m]alphamerge[win]",
+        f"[s0][win]overlay={wx}:{wy}:shortest=1[s1]",
+        "[3:v]format=rgba[fr]",
+        "[s1][fr]overlay=eof_action=repeat,format=yuv420p[v]",
         f"anullsrc=r=48000:cl=stereo,atrim=duration={dur}[a]",
     ]
     run([FFMPEG, "-y", "-v", "error", *inputs, "-filter_complex", ";".join(parts), "-map", "[v]", "-map", "[a]", "-t", str(dur), *ENCODE, str(out)])
