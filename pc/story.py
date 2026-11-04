@@ -94,10 +94,29 @@ def texts(job_id, path):
     print(f"ok {len(options)} options")
 
 
+def still(job_id, image_path, note=""):
+    """Publishes a finished still image (no video) as the next version."""
+    job = store.read(job_id)
+    d = store.job_dir(job_id)
+    n = len(job["versions"]) + 1
+    img = renderer.Image.open(image_path).convert("RGB")
+    img.save(d / "out" / f"v{n}_full.jpg", quality=95, subsampling=0)
+    poster = img.copy()
+    poster.thumbnail((720, 1600))
+    poster.save(d / "out" / f"v{n}.jpg", quality=88)
+    job = store.read(job_id)
+    for fb in job["feedback"]:
+        fb["done"] = True
+    job["versions"].append({"n": n, "note": note, "ts": time.time(), "image": True, "mb": round((d / "out" / f"v{n}_full.jpg").stat().st_size / 1e6, 1)})
+    job["status"] = "lista"
+    store.write(job)
+    print(f"ok v{n} image")
+
+
 def fail(job_id, message):
     store.update(job_id, status="error", error=message[:400])
 
 
 if __name__ == "__main__":
     cmd, *args = sys.argv[1:]
-    {"pending": pending, "show": show, "start": start, "render": do_render, "texts": texts, "fail": fail}[cmd](*args)
+    {"pending": pending, "show": show, "start": start, "render": do_render, "texts": texts, "still": still, "fail": fail}[cmd](*args)

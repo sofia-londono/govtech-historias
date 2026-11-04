@@ -19,7 +19,7 @@ ORIGINS = {"https://govtech-historias.vercel.app", "http://127.0.0.1:8788"}
 ALLOWED_EXT = {"jpg", "jpeg", "png", "webp", "heic", "heif", "mp4", "mov", "m4v", "3gp"}
 MAX_CHUNK = 16 * 1024 * 1024
 MAX_FILE = 4 * 1024 * 1024 * 1024
-MEDIA_NAME = re.compile(r"^v\d+(_preview)?\.(mp4|jpg)$")
+MEDIA_NAME = re.compile(r"^v\d+(_preview|_full)?\.(mp4|jpg)$")
 ROUTE = re.compile(r"^/api/jobs/(?P<id>[a-z0-9]{6,16})(/(?P<rest>.*))?$")
 
 secret = store.load_secret()

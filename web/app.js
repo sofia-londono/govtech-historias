@@ -146,8 +146,8 @@ function jobCard(j) {
   <p class=sm>${esc(j.desc) || '<span class=mut>Sin descripción</span>'}</p>
   ${j.error ? `<p class=sm style='color:var(--red)'>${esc(j.error)}</p>` : ''}
   ${v ? '' : opts}
-  ${v ? `<video class=pv controls playsinline preload=none poster='${media(j.id, `v${v.n}.jpg`)}' src='${media(j.id, `v${v.n}_preview.mp4`)}'></video>${v.note ? `<p class=sm>${esc(v.note)}</p>` : ''}
-  <div class=row><button class=btn data-share=${j.id}_${v.n}>Compartir a Instagram</button><a class='btn alt' style='display:grid;place-items:center;text-decoration:none;box-sizing:border-box' href='${media(j.id, `v${v.n}.mp4`, 1)}'>Descargar</a></div>
+  ${v ? `${v.image ? `<img class=pv style='object-fit:contain' src='${media(j.id, `v${v.n}.jpg`)}' alt=''>` : `<video class=pv controls playsinline preload=none poster='${media(j.id, `v${v.n}.jpg`)}' src='${media(j.id, `v${v.n}_preview.mp4`)}'></video>`}${v.note ? `<p class=sm>${esc(v.note)}</p>` : ''}
+  <div class=row><button class=btn data-share=${j.id}_${v.n}_${v.image ? 1 : 0}>Compartir a Instagram</button><a class='btn alt' style='display:grid;place-items:center;text-decoration:none;box-sizing:border-box' href='${media(j.id, v.image ? `v${v.n}_full.jpg` : `v${v.n}.mp4`, 1)}'>Descargar</a></div>
   <details style='margin-top:9px'><summary class=sm style='min-height:40px;line-height:40px;cursor:pointer'>Algo no me cuadra</summary><textarea id=fb_${j.id} rows=2 placeholder='Dime qué cambio: texto, recorte, formato…'></textarea><p></p><button class='btn alt' data-fb=${j.id}>Enviar corrección</button></details>
   ${j.status == 'lista' ? `<p></p><button class='btn alt' data-pub=${j.id}>Ya la publiqué</button>` : ''}${opts}` : ''}</div>`;
 }
@@ -157,14 +157,14 @@ function rLista() {
   $('lista').innerHTML = `<h1>Historias</h1>` + (state.jobs.length ? state.jobs.map(jobCard).join('') : `<p class=mut>Todavía no hay historias.</p>`);
 }
 
-async function shareVideo(id, n, b) {
-  const url = media(id, `v${n}.mp4`);
+async function shareVideo(id, n, b, image) {
+  const name = image ? `v${n}_full.jpg` : `v${n}.mp4`, url = media(id, name);
   b.disabled = true; b.textContent = 'Preparando…';
   try {
     const blob = await (await fetch(url)).blob();
-    const file = new File([blob], `govtech-${id}-v${n}.mp4`, { type: 'video/mp4' });
+    const file = new File([blob], `govtech-${id}-v${n}.${image ? 'jpg' : 'mp4'}`, { type: image ? 'image/jpeg' : 'video/mp4' });
     if (navigator.canShare?.({ files: [file] })) await navigator.share({ files: [file] });
-    else location.href = media(id, `v${n}.mp4`, 1);
+    else location.href = media(id, name, 1);
   } catch (e) { if (e.name != 'AbortError') toast('Usa Descargar: no se pudo compartir') }
   b.disabled = false; b.textContent = 'Compartir a Instagram';
 }
@@ -209,7 +209,7 @@ document.addEventListener('click', async e => {
   if (D.z) { zona = D.z; ls.set('h_zona', zona); rNueva() }
   if (D.f) { formato = D.f; rNueva() }
   if (b.id == 'send') sendJob();
-  if (D.share) { const [id, n] = D.share.split('_'); shareVideo(id, n, b) }
+  if (D.share) { const [id, n, im] = D.share.split('_'); shareVideo(id, n, b, im == '1') }
   if (D.pub) { await api(`/api/jobs/${D.pub}/status`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: 'publicada' }) }); await refresh(); rLista() }
   if (D.fb) { const t = $('fb_' + D.fb).value.trim(); if (!t) return; document.activeElement.blur(); b.disabled = true; await api(`/api/jobs/${D.fb}/feedback`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: t }) }); toast('Recibido. Ya lo corrijo'); await refresh(); rLista() }
   if (D.copy) { await copyText(D.copy); b.classList.add('ok'); setTimeout(() => b.classList.remove('ok'), 1500); toast('Copiado') }
