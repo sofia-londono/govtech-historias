@@ -277,7 +277,9 @@ def render_cuts(spec, out, tmp):
         inputs += overlay_input(full, tmp, "fixed")
         parts.append(f"[{n}:v]format=rgba,fade=t=in:st=0:d=0.3:alpha=1,trim=duration={total},setpts=PTS-STARTPTS[fx]")
         parts.append("[vc][fx]overlay=shortest=1,format=yuv420p[v]")
-    parts.append("[a0]loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000[a]")
+    # loudnorm on pure silence yields NaN, so only normalize when some cut keeps its sound
+    any_audio = any(f"[{k}:a]" in p for p in parts for k in range(n + 1))
+    parts.append("[a0]loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000[a]" if any_audio else "[a0]anull[a]")
     run([FFMPEG, "-y", "-v", "error", *inputs, "-filter_complex", ";".join(parts), "-map", "[v]", "-map", "[a]", *ENCODE, str(out)])
 
 
@@ -1149,6 +1151,73 @@ def render_badges(spec, out, tmp):
     run([FFMPEG, "-y", "-v", "error", *inputs, "-filter_complex", ";".join(parts), "-map", "[v]", "-map", "[a]", "-t", str(dur), *ENCODE, str(out)])
 
 
+def render_opener(spec, out, tmp):
+    """Day opener: fast flashes of the previous day, then a giant counter that flips to the new
+    day number over a black-and-white photo, the word DÍA and a closing line."""
+    op = spec["opener"]
+    flashes = spec["items"][:-1]
+    photo = spec["items"][-1]
+    part_a = Path(tmp) / "a.mp4"
+    render_cuts({"layout": "cuts", "items": [{**it, "audio": False} for it in flashes]}, part_a, tmp)
+    dur_b = op.get("duration", 4.2)
+    base = ImageOps.exif_transpose(Image.open(photo["src"])).convert("L")
+    base = ImageOps.fit(base, (round(W * 1.1), round(H * 1.1)), Image.LANCZOS, centering=photo.get("focus", [0.5, 0.5]))
+    base = Image.eval(ImageOps.autocontrast(base, cutoff=1), lambda v: int(v * 0.55)).convert("RGB")
+    fnum = font("inter", 520, 800)
+    old_n = draw_line(op.get("from", "01"), fnum, WHITE, 1.2)
+    new_n = draw_line(op.get("to", "02"), fnum, BLUE, 1.2)
+    word = draw_line(op.get("word", "DÍA"), font("inter", 120, 800), WHITE, 1.2)
+    sub = draw_line(op.get("sub", "GovTech Summit 2026"), font("raleway", 44, 600), WHITE)
+    tag = text_layer({"lines": [op["tagline"]], "size": 54, "pos": H // 2 + 640}) if op.get("tagline") else None
+    nh = max(old_n.height, new_n.height)
+    cy = H // 2 - 40
+    frames = round(dur_b * FPS)
+    enc = subprocess.Popen(
+        [FFMPEG, "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-",
+         "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-shortest", *ENCODE, str(Path(tmp) / "b.mp4")],
+        stdin=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    for n in range(frames):
+        t = n / FPS
+        # photo fades in behind the counter and keeps a slow push-in
+        pa = min(1, max(0, (t - 0.9) / 0.6))
+        z = 1 + 0.06 * (t / dur_b)
+        cw_, ch_ = round(W * 1.1 / z), round(H * 1.1 / z)
+        ox, oy = (base.width - cw_) // 2, (base.height - ch_) // 2
+        bgf = base.crop((ox, oy, ox + cw_, oy + ch_)).resize((W, H), Image.BILINEAR)
+        frame = Image.blend(Image.new("RGB", (W, H), (0, 0, 0)), bgf, pa).convert("RGBA")
+        # counter: 01 slides up and out, 02 rises in from below inside a fixed window
+        win = Image.new("RGBA", (W, nh + 40), (0, 0, 0, 0))
+        p = min(1, max(0, (t - 0.55) / 0.45))
+        e = 1 - (1 - p) ** 3
+        win.alpha_composite(old_n, ((W - old_n.width) // 2, round(20 - e * (nh + 40))))
+        win.alpha_composite(new_n, ((W - new_n.width) // 2, round(20 + (1 - e) * (nh + 40))))
+        frame.alpha_composite(win, (0, cy - nh // 2 - 20))
+        wa = min(1, max(0, (t - 1.2) / 0.4))
+        if wa > 0:
+            w2 = word.copy()
+            w2.putalpha(w2.getchannel("A").point(lambda v: int(v * wa)))
+            frame.alpha_composite(w2, ((W - word.width) // 2, cy - nh // 2 - word.height - 10 + round((1 - wa) * 30)))
+            s2 = sub.copy()
+            s2.putalpha(s2.getchannel("A").point(lambda v: int(v * wa)))
+            frame.alpha_composite(s2, ((W - sub.width) // 2, cy + nh // 2 + 20))
+            lw = round(320 * wa)
+            ImageDraw.Draw(frame).rectangle([W // 2 - lw // 2, cy + nh // 2 + 20 + sub.height + 14, W // 2 + lw // 2, cy + nh // 2 + 20 + sub.height + 20], fill=BLUE)
+        ta = min(1, max(0, (t - 2.0) / 0.5))
+        if tag and ta > 0:
+            t2 = tag.copy()
+            t2.putalpha(t2.getchannel("A").point(lambda v: int(v * ta)))
+            frame.alpha_composite(t2)
+        enc.stdin.write(frame.convert("RGB").tobytes())
+    enc.stdin.close()
+    err = enc.stderr.read().decode(errors="replace")
+    if enc.wait():
+        raise RuntimeError(err[-1500:])
+    lst = Path(tmp) / "list.txt"
+    lst.write_text(f"file '{part_a.as_posix()}'\nfile '{(Path(tmp) / 'b.mp4').as_posix()}'\n")
+    run([FFMPEG, "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", str(lst), "-c", "copy", "-movflags", "+faststart", str(out)])
+
+
 def paper_sheet(size, seed):
     rng = np.random.default_rng(seed)
     noise = rng.normal(0, 3.2, (size, size)).astype(np.float32)
@@ -1320,7 +1389,7 @@ def previews(out):
 
 def render(spec, out):
     with tempfile.TemporaryDirectory() as tmp:
-        {"cuts": render_cuts, "stack": render_stack, "grid": render_grid, "split": render_split, "agenda": render_agenda, "postcard": render_postcard, "board": render_board, "plan": render_plan, "badges": render_badges, "note": render_note}[spec["layout"]](spec, out, tmp)
+        {"cuts": render_cuts, "stack": render_stack, "grid": render_grid, "split": render_split, "agenda": render_agenda, "postcard": render_postcard, "board": render_board, "plan": render_plan, "badges": render_badges, "opener": render_opener, "note": render_note}[spec["layout"]](spec, out, tmp)
     return previews(out)
 
 
