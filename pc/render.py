@@ -1328,6 +1328,90 @@ def render_tearoff(spec, out, tmp):
     run([FFMPEG, "-y", "-v", "error", *inputs, "-filter_complex", ";".join(parts), "-map", "[v]", "-map", "[a]", "-t", str(dur), *ENCODE, str(out)])
 
 
+def ticket_card(tk, tw):
+    """Event ticket: blue header, title, details row, perforated stub with a barcode."""
+    s = 2
+    ft = font("raleway", 50, 800)
+    lines = wrap(tk["title"], ft, tw - 110)
+    head_h, body_top = 92, 92 + 34
+    title_h = sum(ft.getbbox("Ág")[3] + 8 for _ in lines)
+    details_h = 110
+    stub_h = 150
+    th = body_top + title_h + 30 + details_h + stub_h
+    im = Image.new("RGBA", (tw * s, th * s), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    d.rounded_rectangle([0, 0, tw * s - 1, th * s - 1], radius=30 * s, fill=(250, 250, 248, 255))
+    d.rounded_rectangle([0, 0, tw * s - 1, head_h * s], radius=30 * s, fill=BLUE)
+    d.rectangle([0, (head_h - 30) * s, tw * s - 1, head_h * s], fill=BLUE)
+    cut = th - stub_h
+    for x in (0, tw):
+        d.ellipse([(x - 26) * s, (cut - 26) * s, (x + 26) * s, (cut + 26) * s], fill=(0, 0, 0, 0))
+    for x in range(44, tw - 40, 26):
+        d.line([(x * s, cut * s), ((x + 12) * s, cut * s)], fill=(190, 192, 196, 255), width=3 * s)
+    im = im.resize((tw, th), Image.LANCZOS)
+    hd = draw_line(tk.get("header", "MAIN STAGE · AHORA"), font("inter", 32, 800), WHITE)
+    im.alpha_composite(hd, (55, (head_h - hd.height) // 2))
+    if tk.get("live"):
+        ImageDraw.Draw(im).ellipse([tw - 80, head_h // 2 - 12, tw - 56, head_h // 2 + 12], fill=(255, 80, 70, 255))
+    y = body_top
+    for ln in lines:
+        li = draw_line(ln, ft, (22, 22, 26, 255))
+        im.alpha_composite(li, (55, y))
+        y += li.height + 2
+    y += 22
+    cols = tk.get("details", [])
+    cw = (tw - 110) // max(1, len(cols))
+    for k, (lab, val) in enumerate(cols):
+        la = draw_line(lab, font("inter", 22, 700), (130, 134, 140, 255))
+        va = draw_line(val, font("raleway", 34, 800), BLUE)
+        im.alpha_composite(la, (55 + k * cw, y))
+        im.alpha_composite(va, (55 + k * cw, y + la.height + 4))
+    sy = cut + 34
+    bd = ImageDraw.Draw(im)
+    rng = np.random.default_rng(4)
+    x = 55
+    while x < tw - 360:
+        wbar = int(rng.choice([3, 3, 5, 8]))
+        bd.rectangle([x, sy, x + wbar, sy + 80], fill=(30, 30, 34, 255))
+        x += wbar + int(rng.choice([3, 4, 6]))
+    st = draw_line(tk.get("stub", "GovTech Summit 2026"), font("raleway", 30, 700), (22, 22, 26, 255))
+    im.alpha_composite(st, (tw - 55 - st.width, sy + 8))
+    st2 = draw_line(tk.get("stub2", "CEFE Chapinero"), font("raleway", 26, 600), (120, 124, 130, 255))
+    im.alpha_composite(st2, (tw - 55 - st2.width, sy + 48))
+    return im
+
+
+def render_ticket(spec, out, tmp):
+    """The clip plays full screen; a ticket with the session slides up into the lower area."""
+    dur = spec.get("duration", 8)
+    tk = spec["ticket"]
+    item = {**spec["items"][0], "audio": spec["items"][0].get("audio", False)}
+    args, chain, has_audio = source(item, 0, tmp, W, H, dur)
+    tw = W - 180
+    card = ticket_card(tk, tw)
+    layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    sh = Image.new("RGBA", card.size, (0, 0, 0, 0))
+    sh.putalpha(card.getchannel("A").point(lambda a: a * 0.6))
+    ty = tk.get("y", BOTTOM - card.height + 40)
+    layer.alpha_composite(sh.filter(ImageFilter.GaussianBlur(20)), (90 + 6, ty + 16))
+    layer.alpha_composite(card, (90, ty))
+    lead = text_layer({"lines": [tk["lead"]], "size": 58, "pos": ty - 40}) if tk.get("lead") else None
+    if lead:
+        layer.alpha_composite(lead)
+    inputs = args + overlay_input(layer, tmp, "ticket")
+    rise = 160
+    parts = [
+        f"[0:v]{chain}[b]",
+        f"[1:v]format=rgba,fade=t=in:st=0.3:d=0.5:alpha=1,trim=duration={dur},setpts=PTS-STARTPTS[o]",
+        f"[b][o]overlay=x=0:y='if(lt(t,0.3),{rise},if(lt(t,0.9),{rise}*(1-(t-0.3)/0.6)*(1-(t-0.3)/0.6),0))':shortest=1,format=yuv420p[v]",
+    ]
+    if has_audio:
+        parts.append(f"[0:a]atrim=duration={dur},asetpts=PTS-STARTPTS,loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000[a]")
+    else:
+        parts.append(f"anullsrc=r=48000:cl=stereo,atrim=duration={dur}[a]")
+    run([FFMPEG, "-y", "-v", "error", *inputs, "-filter_complex", ";".join(parts), "-map", "[v]", "-map", "[a]", "-t", str(dur), *ENCODE, str(out)])
+
+
 def paper_sheet(size, seed):
     rng = np.random.default_rng(seed)
     noise = rng.normal(0, 3.2, (size, size)).astype(np.float32)
@@ -1502,7 +1586,7 @@ def previews(out):
 
 def render(spec, out):
     with tempfile.TemporaryDirectory() as tmp:
-        {"cuts": render_cuts, "stack": render_stack, "grid": render_grid, "split": render_split, "agenda": render_agenda, "postcard": render_postcard, "board": render_board, "plan": render_plan, "badges": render_badges, "opener": render_opener, "tearoff": render_tearoff, "note": render_note}[spec["layout"]](spec, out, tmp)
+        {"cuts": render_cuts, "stack": render_stack, "grid": render_grid, "split": render_split, "agenda": render_agenda, "postcard": render_postcard, "board": render_board, "plan": render_plan, "badges": render_badges, "opener": render_opener, "tearoff": render_tearoff, "ticket": render_ticket, "note": render_note}[spec["layout"]](spec, out, tmp)
     return previews(out)
 
 
