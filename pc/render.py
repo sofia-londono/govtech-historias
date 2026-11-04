@@ -353,7 +353,9 @@ def grid_design(design, cells, rh, labels):
         d.rounded_rectangle([x * s, y * s, (x + cw) * s - 1, (y + rh) * s - 1], radius=r * s, fill=0)
     # only the event's colors: black background and a solid #3BA9F0 frame around each photo
     frame = Image.new("RGBA", (W, H), (0, 0, 0, 255))
-    frame.putalpha(mask.resize((W, H), Image.LANCZOS))
+    hole = np.asarray(mask.resize((W, H), Image.LANCZOS)).astype(np.float32)
+    # with a blurred backdrop the frame is only a dark veil, so the photo shows through
+    frame.putalpha(Image.fromarray((hole * design.get("veil", 1.0)).astype(np.uint8)))
     bw = design.get("border", 6)
     edge = Image.new("L", (W * s, H * s), 0)
     ed = ImageDraw.Draw(edge)
@@ -368,8 +370,18 @@ def grid_design(design, cells, rh, labels):
     imgs = []
     for i, t in enumerate(title):
         ftt = font("raleway", 64 if i == 0 else 38, 700 if i == 0 else 600)
-        for ln in wrap(t, ftt, W - 200):  # keep a margin to the screen edges
-            imgs.append(draw_line(ln, ftt, WHITE if i == 0 else (190, 220, 240, 255)))
+        for ln in wrap(t, ftt, W - 260):  # keep a margin to the screen edges
+            im_ = draw_line(ln, ftt, WHITE if i == 0 else (190, 220, 240, 255))
+            if i == 0 and design.get("title_logo") and not imgs:
+                # the brand's logo sits next to the title, at the text's height
+                lg = Image.open(design["title_logo"]).convert("RGBA")
+                lh = round(im_.height * 0.62)
+                lg = lg.resize((round(lg.width * lh / lg.height), lh), Image.LANCZOS)
+                both = Image.new("RGBA", (im_.width + 22 + lg.width, im_.height), (0, 0, 0, 0))
+                both.alpha_composite(im_, (0, 0))
+                both.alpha_composite(lg, (im_.width + 22, (im_.height - lh) // 2 + 4))
+                im_ = both
+            imgs.append(im_)
     y -= sum(im.height for im in imgs)
     for i, im in enumerate(imgs):
         frame.alpha_composite(im, ((W - im.width) // 2, y))
@@ -541,7 +553,13 @@ def render_grid(spec, out, tmp):
         args, chain, _ = source({**item, "audio": False, "sharp": True}, i, tmp, cw, rh, dur)
         inputs += args
         parts.append(f"[{i}:v]{chain}[r{i}]")
-    parts.append(f"color=c={'black' if design else 'white'}:s={W}x{H}:r={FPS}:d={dur},format=yuv420p[bg]")
+    if design and design.get("backdrop") == "blur":
+        bargs, bchain, _ = source({**items[0], "audio": False}, n + 1, tmp, W, H, dur)
+        inputs += bargs
+        parts.append(f"[{n}:v]{bchain},boxblur=26:2,eq=brightness=-0.12,format=yuv420p[bg]")
+        n += 1
+    else:
+        parts.append(f"color=c={'black' if design else 'white'}:s={W}x{H}:r={FPS}:d={dur},format=yuv420p[bg]")
     last = "bg"
     for i, (x, y, _) in enumerate(cells):
         parts.append(f"[{last}][r{i}]overlay={x}:{y}[s{i}]")
